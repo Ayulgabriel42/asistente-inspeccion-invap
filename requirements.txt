@@ -3,3 +3,4 @@ google-cloud-aiplatform
 google-cloud-speech
 pypdf
 langchain
+google-genai
