@@ -21,9 +21,20 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. INICIALIZACIÓN DEL MOTOR (Asegurate que engine.py exista) ---
-CLAVE_IA = "AIzaSyDHW2_iO36Mb77uICBVlDxDFgZ5N2hD1HA"
-motor = InspeccionEngine(api_key=CLAVE_IA)
+# --- 2. INICIALIZACIÓN DEL MOTOR ---
+# Leemos la clave de forma segura desde .streamlit/secrets.toml
+CLAVE_IA = st.secrets["GEMINI_API_KEY"]
+
+if 'motor' not in st.session_state:
+    st.session_state['motor'] = InspeccionEngine(api_key=CLAVE_IA)
+
+
+# Estado persistente para el texto de la voz y el informe
+if 'hallazgo_texto' not in st.session_state:
+    st.session_state['hallazgo_texto'] = ""
+
+if 'ultimo_informe' not in st.session_state:
+    st.session_state['ultimo_informe'] = ""
 
 # --- 3. CABECERA ---
 col_logo, col_tit = st.columns([1, 5])
@@ -60,6 +71,7 @@ with tab_dash:
     col_g1, col_g2 = st.columns(2)
     with col_g1:
         st.write("📈 **Tendencia de Hallazgos (2026)**")
+        # Análisis de base de datos con IA y generar tendencias [cite: 7]
         chart_data = pd.DataFrame(
             np.random.randn(20, 3),
             columns=['Mástiles', 'Subestructuras', 'Bombas']
@@ -77,7 +89,7 @@ with tab_dash:
         st.table(data_table)
 
 # =========================================================
-# SOLAPA 2: ASISTENTE DE INSPECCIÓN (Generador)
+# SOLAPA 2: ASISTENTE DE INSPECCIÓN (Generador con Voz)
 # =========================================================
 with tab_inspeccion:
     st.subheader("🚀 Generador de Informes Técnicos")
@@ -87,20 +99,50 @@ with tab_inspeccion:
         st.info("Cargue los datos del hallazgo observado en campo.")
         sistema = st.selectbox("Sistema:", ["Mástil/Subestructura", "Izaje", "Bombas", "Recipientes"])
         ref = st.text_input("Ubicación exacta:", "Ej: Tramo C, Lado A")
-        hallazgo = st.text_area("Descripción del hallazgo:", height=200, placeholder="Ej: Se observa fisura de...")
+        
+      # --- INTEGRACIÓN DE VOZ ---
+        # Herramienta que facilite el registro de notas con comandos de voz [cite: 16]
+        st.write("🎤 **Dictado por voz (Opcional)**")
+        audio_data = st.audio_input("Grabe la descripción del hallazgo")
+        
+        if audio_data:
+            with st.spinner("Transcribiendo audio..."):
+                texto_ia = st.session_state['motor'].transcribir_audio(
+                    audio_data.read(), 
+                    audio_data.type
+                )
+                # CAMBIO CLAVE: Enviamos el texto directamente a la "key" del cuadro editable
+                st.session_state['input_hallazgo_usuario'] = texto_ia
+
+        # El área de texto se llena automáticamente con la voz gracias a la 'key'
+        hallazgo_final = st.text_area(
+            "Descripción del hallazgo (Editable):", 
+            height=200, 
+            key="input_hallazgo_usuario",
+            placeholder="Ej: Se observa fisura de..."
+        )
+
+       
         
         if st.button("Generar Informe con IA"):
-            if not hallazgo:
+            if not hallazgo_final:
                 st.error("Por favor, ingrese el hallazgo.")
             else:
-                with st.spinner("Gemini 2.5 Flash analizando..."):
-                    st.session_state['ultimo_informe'] = motor.procesar_hallazgo(sistema, hallazgo)
+                with st.spinner("Analizando..."):
+                    # Automatizar el armado del informe de cada inspección 
+                    # Asumimos que procesar_hallazgo es el método correcto según tu versión de GitHub
+                    st.session_state['ultimo_informe'] = st.session_state['motor'].procesar_hallazgo(sistema, hallazgo_final)
                     st.success("¡Informe generado con éxito!")
 
     with c2:
-        if 'ultimo_informe' in st.session_state:
+        if st.session_state['ultimo_informe']:
+            # Finalizada la inspección, el inspector sólo debería leer el informe generado por la herramienta [cite: 17]
             st.markdown(st.session_state['ultimo_informe'])
-            st.download_button("Descargar Informe (TXT)", st.session_state['ultimo_informe'], file_name="informe_invap.txt")
+            st.download_button(
+                "Descargar Informe (TXT)", 
+                st.session_state['ultimo_informe'], 
+                file_name="informe_invap.txt"
+            )
         else:
             st.write("Complete el formulario de la izquierda para ver el análisis aquí.")
 
@@ -110,6 +152,7 @@ with tab_inspeccion:
 with tab_qa:
     st.subheader("🔍 Agente de Revisión y QA de Informes")
     st.write("Pegue un informe redactado para que la IA verifique su consistencia técnica y normativa.")
+    # Agente de IA para corregir informes (QA) [cite: 10]
     
     reporte_input = st.text_area("Texto del informe a auditar:", height=300)
     
@@ -129,17 +172,20 @@ with tab_qa:
                 4. Da un veredicto: APROBADO, OBSERVADO o RECHAZADO.
                 """
                 
-                # Llamada directa a la IA
-                revision = motor.client.models.generate_content(
-                    model=motor.model_id,
-                    contents=prompt_qa
-                )
+                # Llamada a la API según el método de tu versión original
+                try:
+                     revision = st.session_state['motor'].client.models.generate_content(
+                        model=st.session_state['motor'].model_id,
+                        contents=prompt_qa
+                    )
+                     st.subheader("📋 Resultados de la Auditoría")
+                     st.warning("Análisis de Calidad Finalizado")
+                     st.write(revision.text)
+                except Exception as e:
+                     st.error(f"Error al conectar con la IA para la auditoría: {e}")
                 
-                st.subheader("📋 Resultados de la Auditoría")
-                st.warning("Análisis de Calidad Finalizado")
-                st.write(revision.text)
         else:
             st.error("Por favor, pegue un informe para auditar.")
 
 st.divider()
-st.caption("© 2026 INVAP Ingeniería S.A. - Desarrollado con Gemini 2.5 Flash Engine")
+st.caption("© 2026 INVAP Ingeniería S.A. - Desarrollado con Engine IA")
