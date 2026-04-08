@@ -3,25 +3,34 @@ from google import genai
 from google.genai import types
 import pandas as pd
 import numpy as np
-from PIL import Image
-import io
 import datetime
 
 # =========================================================
-# 1. MOTOR DE IA (InspeccionEngine)
+# 1. MOTOR DE IA (InspeccionEngine) - INTEGRADO CON NORMAS
 # =========================================================
+
+# Diccionario de normas según listados de INVAP
+MAPEO_NORMAS = {
+    "Mástil/Subestructura": "API RP 4G (Inspección de Estructuras)",
+    "Piping / Tuberías": "ASME B31.3 / API 570",
+    "Recipientes a Presión": "ASME Sección VIII / API 510",
+    "Soldadura y Estructuras": "AWS D1.1 (Structural Welding Code)",
+    "Izaje y Puentes Grúa": "IRAM 2552 / ASME B30.5",
+    "Bombas y Equipos": "API 610 / Normas específicas"
+}
+
 class InspeccionEngine:
     def __init__(self, api_key):
         self.client = genai.Client(api_key=api_key)
-        self.model_id = "gemini-2.5-flash" 
+        self.model_id = "gemini-1.5-flash-001"
 
     def procesar_hallazgo(self, sistema, observacion):
+        norma = MAPEO_NORMAS.get(sistema, "Normas de referencia INVAP")
         prompt = f"""
         Actúa como Inspector Senior de INVAP.
-        SISTEMA: {sistema}
+        SISTEMA: {sistema} | NORMA: {norma}
         HALLAZGO: {observacion}
-        TAREA: Clasifica según API RP 4G y sugiere acción técnica.
-        Responde en español profesional.
+        TAREA: Clasifica criticidad y sugiere acción técnica profesional.
         """
         try:
             response = self.client.models.generate_content(model=self.model_id, contents=prompt)
@@ -29,13 +38,9 @@ class InspeccionEngine:
         except Exception as e:
             return f"❌ Error: {str(e)}"
 
-    def analizar_visual(self, imagen_bytes, mime_type, observacion_texto, sistema):
-        prompt = f"""
-        Actúa como Inspector Senior de INVAP Ingeniería S.A.
-        SISTEMA: {sistema} | OBSERVACIÓN: {observacion_texto}
-        TAREA: Analiza la imagen, identifica daños y cruza con normas ASME/API.
-        Determina No Conformidad y acción (Reparar/Reemplazar).
-        """
+    def analizar_visual(self, imagen_bytes, mime_type, observacion, sistema):
+        norma = MAPEO_NORMAS.get(sistema, "API/ASME")
+        prompt = f"Inspector INVAP: Analiza daños en {sistema} según {norma}. Hallazgo: {observacion}"
         try:
             response = self.client.models.generate_content(
                 model=self.model_id,
@@ -46,7 +51,8 @@ class InspeccionEngine:
             return f"❌ Error Visual: {str(e)}"
 
     def transcribir_audio(self, audio_bytes, mime_type):
-        prompt = "Transcribe este audio técnico de inspección de INVAP. Solo el texto limpio."
+        # Prompt optimizado para ambientes ruidosos (Bases de diseño INVAP)
+        prompt = "Transcribe audio técnico de inspección. Ignora ruido de fondo, viento y motores. Solo texto técnico limpio."
         try:
             response = self.client.models.generate_content(
                 model=self.model_id,
@@ -59,10 +65,8 @@ class InspeccionEngine:
     def auditar_formato_invap(self, contenido_reporte, es_pdf=False):
         reglas_invap = """
         ESTÁNDAR FE-44 rev00:
-        1. Secciones: 1. INTRODUCCIÓN, 2. DESARROLLO (2.1 Pozo, 2.2 Equipo, 2.3 Campo), 3. CONCLUSIÓN.
-        2. Reporte Campo: Debe separar Documental (2.3.1) de Visual (2.3.2).
-        3. Hallazgos: Requiere Descripción, Foto y Criticidad (Crítica/Mayor/Menor).
-        4. Resumen: Debe incluir tabla de desvíos Relevados vs Solucionados.
+        1. Secciones: 1. INTRODUCCIÓN, 2. DESARROLLO, 3. CONCLUSIÓN.
+        2. Hallazgos: Requiere Descripción, Foto y Criticidad.
         """
         prompt = f"{reglas_invap}\n\nAnaliza si el reporte cumple el formato FE-44 de INVAP:"
         try:
@@ -75,29 +79,22 @@ class InspeccionEngine:
             return f"❌ Error QA: {str(e)}"
 
 # =========================================================
-# 2. INTERFAZ STREAMLIT
+# 2. INTERFAZ STREAMLIT (Recuperando Dashboard y Tabs)
 # =========================================================
 st.set_page_config(page_title="INVAP - Ecosistema de IA", page_icon="⚙️", layout="wide")
-
-# Estilos
-st.markdown("<style>.stButton>button {width: 100%; font-weight: bold;}</style>", unsafe_allow_html=True)
-
-# Inicialización
-if 'GEMINI_API_KEY' not in st.secrets:
-    st.error("Configura GEMINI_API_KEY en secrets.")
-    st.stop()
 
 if 'motor' not in st.session_state:
     st.session_state['motor'] = InspeccionEngine(api_key=st.secrets["GEMINI_API_KEY"])
 
-# Cabecera
+# Cabecera original
 col_l, col_t = st.columns([1, 5])
 with col_l: st.image("https://www.invap.com.ar/wp-content/uploads/2022/04/Logo-INVAP-Blanco.png", width=100)
 with col_t: st.title("Sistema Inteligente de Gestión de Integridad")
 
+# Recuperamos los 3 Tabs originales
 tab_dash, tab_inspeccion, tab_qa = st.tabs(["📊 Dashboard", "🚀 Asistente de Inspección", "🔍 Agente QA FE-44"])
 
-# --- TAB 1: DASHBOARD ---
+# --- TAB 1: DASHBOARD (Recuperado) ---
 with tab_dash:
     st.subheader("Estado Global de Activos")
     m1, m2, m3 = st.columns(3)
@@ -106,11 +103,10 @@ with tab_dash:
     m3.metric("Conformidad", "94%")
     st.area_chart(pd.DataFrame(np.random.randn(20, 2), columns=['Mástiles', 'Bombas']))
 
-# --- TAB 2: ASISTENTE ---
+# --- TAB 2: ASISTENTE (Con lógica de normas agregada) ---
 with tab_inspeccion:
     st.subheader("🚀 Nueva Inspección Técnica")
     
-    # BOTÓN REFRESH
     if st.button("🔄 Iniciar Nueva Inspección (Limpiar)"):
         for key in ['input_hallazgo_usuario', 'ultimo_informe']:
             if key in st.session_state: del st.session_state[key]
@@ -118,35 +114,35 @@ with tab_inspeccion:
 
     c1, c2 = st.columns([1, 2])
     with c1:
-        sistema = st.selectbox("Sistema:", ["Mástil/Subestructura", "Izaje", "Piping", "Recipientes", "Bombas"])
+        sistema_sel = st.selectbox("Sistema:", list(MAPEO_NORMAS.keys()))
+        st.info(f"📚 Norma Aplicada: **{MAPEO_NORMAS[sistema_sel]}**")
+        
         foto_c = st.camera_input("Cámara")
         foto_a = st.file_uploader("Archivo", type=["jpg", "png"])
         foto_f = foto_c if foto_c else foto_a
         
         audio = st.audio_input("Voz")
         if audio:
-            with st.spinner("Transcribiendo..."):
+            with st.spinner("Transcribiendo en ambiente ruidoso..."):
                 st.session_state['input_hallazgo_usuario'] = st.session_state['motor'].transcribir_audio(audio.read(), audio.type)
         
-        hallazgo = st.text_area("Descripción:", height=150, key="input_hallazgo_usuario")
+        hallazgo = st.text_area("Descripción:", value=st.session_state.get('input_hallazgo_usuario', ""), height=150)
         
         if st.button("Generar Informe"):
-            with st.spinner("Analizando..."):
+            with st.spinner("Analizando bajo normativa..."):
                 if foto_f:
-                    res = st.session_state['motor'].analizar_visual(foto_f.read(), foto_f.type, hallazgo, sistema)
+                    res = st.session_state['motor'].analizar_visual(foto_f.read(), foto_f.type, hallazgo, sistema_sel)
                 else:
-                    res = st.session_state['motor'].procesar_hallazgo(sistema, hallazgo)
+                    res = st.session_state['motor'].procesar_hallazgo(sistema_sel, hallazgo)
                 st.session_state['ultimo_informe'] = res
 
     with c2:
         if st.session_state.get('ultimo_informe'):
             st.info(st.session_state['ultimo_informe'])
 
-# --- TAB 3: QA ---
+# --- TAB 3: QA (Recuperado) ---
 with tab_qa:
     st.subheader("🔍 Auditoría de Formato FE-44")
-
-    # BOTÓN REFRESH
     if st.button("🔄 Limpiar Auditoría"):
         if 'resultado_qa' in st.session_state: del st.session_state['resultado_qa']
         st.rerun()
@@ -155,7 +151,7 @@ with tab_qa:
     texto_qa = st.text_area("O pegue el texto:")
     
     if st.button("Auditar Reporte"):
-        with st.spinner("Validando..."):
+        with st.spinner("Validando cumplimiento..."):
             if archivo_pdf:
                 st.session_state['resultado_qa'] = st.session_state['motor'].auditar_formato_invap(archivo_pdf.read(), es_pdf=True)
             else:
