@@ -3,7 +3,9 @@ from google.genai import types
 
 class InspeccionEngine:
     def __init__(self, api_key):
+        # Inicialización del cliente con el SDK moderno
         self.client = genai.Client(api_key=api_key)
+        # ID verificado en tu catálogo de modelos
         self.model_id = "gemini-2.5-flash"
 
     def procesar_hallazgo(self, sistema, observacion):
@@ -24,7 +26,7 @@ class InspeccionEngine:
             return f"❌ Error en el motor: {str(e)}"
 
     def transcribir_audio(self, audio_bytes, mime_type):
-        prompt = "Actúa como inspector de INVAP. Transcribe este audio ignorando ruidos de fondo de la industria o viento. Devuelve solo el texto técnico limpio."
+        prompt = "Actúa como inspector de INVAP. Transcribe este audio ignorando ruidos de fondo. Devuelve solo el texto técnico limpio."
         try:
             response = self.client.models.generate_content(
                 model=self.model_id,
@@ -37,9 +39,7 @@ class InspeccionEngine:
         except Exception as e:
             return f"❌ Error en la IA al transcribir: {str(e)}"
 
-    # NUEVA FUNCIÓN SOLICITADA
     def analizar_pdf_qa(self, pdf_bytes, prompt_personalizado):
-        """Analiza el PDF subido para la auditoría de QA."""
         try:
             response = self.client.models.generate_content(
                 model=self.model_id,
@@ -51,3 +51,17 @@ class InspeccionEngine:
             return response.text
         except Exception as e:
             return f"❌ Error analizando el PDF: {str(e)}"
+
+    def analizar_visual(self, imagen_bytes, mime_type, observacion, sistema):
+        prompt = f"Inspector INVAP: Analiza daños en {sistema}. Hallazgo: {observacion}."
+        try:
+            response = self.client.models.generate_content(
+                model=self.model_id,
+                contents=[
+                    types.Part.from_bytes(data=imagen_bytes, mime_type=mime_type),
+                    prompt
+                ]
+            )
+            return response.text
+        except Exception as e:
+            return f"❌ Error Visual: {str(e)}"
