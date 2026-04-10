@@ -1,6 +1,7 @@
 streamlit
-google-cloud-aiplatform
-google-cloud-speech
-pypdf
+google-cloud-storage
 langchain
-google-genai
+langchain-community
+langchain-google-genai
+pypdf
+faiss-cpu
