@@ -18,24 +18,19 @@ st.set_page_config(page_title="INVAP - Ecosistema de IA", page_icon="⚙️", la
 
 creds = None
 if "gcp_service_account" in st.secrets:
-    # Caso Nube: Extrae datos desde los secretos de Streamlit
     info = dict(st.secrets["gcp_service_account"])
     creds = service_account.Credentials.from_service_account_info(info)
 elif os.path.exists("google-credentials.json"):
-    # Caso Local/Codespaces: Usa el archivo
     creds = service_account.Credentials.from_service_account_file("google-credentials.json")
 
-# Inicialización del Motor
 if 'motor' not in st.session_state:
     st.session_state['motor'] = InspeccionEngine(
         api_key=st.secrets["GEMINI_API_KEY"],
         creds=creds
     )
 
-# Cargar lista de normas del bucket
 if 'lista_normas' not in st.session_state:
     try:
-        # ---> SOLUCIÓN AL ERROR: SE PASAN LAS CREDENCIALES AL CLIENTE <---
         client = storage.Client(credentials=creds)
         blobs = client.list_blobs("invap-asistente-normas")
         st.session_state['lista_normas'] = [blob.name for blob in blobs if blob.name.lower().endswith('.pdf')]
@@ -82,16 +77,31 @@ with tab_inspeccion:
         foto_a = st.file_uploader("O subir imagen", type=["jpg", "png", "jpeg"])
         foto_final = foto_c if foto_c else foto_a
         
+        # --- LÓGICA DE GENERACIÓN MODIFICADA PARA CRUCE DE DATOS ---
         if st.button("🚀 Generar Informe Técnico"):
-            with st.spinner("Agente clasificando norma y analizando con RAG..."):
-                if hallazgo and st.session_state.get('lista_normas'):
-                    norma_elegida = st.session_state['motor'].clasificar_norma_ia(hallazgo, st.session_state['lista_normas'])
-                    res, norma_ref = st.session_state['motor'].consultar_normativa_rag(norma_elegida, hallazgo)
+            if not hallazgo and not foto_final:
+                st.warning("⚠️ Agregue una descripción o una imagen para analizar.")
+            elif not st.session_state.get('lista_normas'):
+                st.error("❌ No hay normas cargadas en el sistema.")
+            else:
+                with st.spinner("Agente Multimodal cruzando Norma + Texto + Imagen..."):
+                    # 1. Definir entrada para clasificar la norma (texto o sistema)
+                    input_clasificacion = hallazgo if hallazgo else f"Inspección visual de {sistema_sel}"
+                    norma_elegida = st.session_state['motor'].clasificar_norma_ia(input_clasificacion, st.session_state['lista_normas'])
+                    
+                    # 2. Extraer bytes de imagen si existen
+                    img_bytes = foto_final.read() if foto_final else None
+                    img_mime = foto_final.type if foto_final else None
+                    
+                    # 3. Llamada Multimodal al Motor
+                    res, norma_ref = st.session_state['motor'].consultar_normativa_rag(
+                        norma_path=norma_elegida,
+                        hallazgo=hallazgo,
+                        imagen_bytes=img_bytes,
+                        mime_type=img_mime
+                    )
+                    
                     st.session_state['ultimo_informe'] = f"**Norma de Referencia:** {norma_ref}\n\n{res}"
-                elif foto_final:
-                    st.session_state['ultimo_informe'] = st.session_state['motor'].analizar_visual(foto_final.read(), foto_final.type, hallazgo, sistema_sel)
-                else:
-                    st.warning("Escriba un hallazgo o asegúrese de que la biblioteca de normas esté cargada.")
 
     with c2:
         st.subheader("📋 Previsualización")

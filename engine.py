@@ -1,4 +1,3 @@
-# --- engine.py ---
 from google import genai
 from google.genai import types
 from google.cloud import storage
@@ -8,16 +7,12 @@ from langchain_community.document_loaders import PyPDFLoader
 import os
 
 class InspeccionEngine:
-    # EL CAMBIO ESTÁ AQUÍ: Agregamos , creds=None
     def __init__(self, api_key, creds=None): 
         self.client = genai.Client(api_key=api_key)
-        self.creds = creds  # <--- Esto es lo que faltaba guardar
+        self.creds = creds 
         self.model_id = "gemini-2.5-flash"
         self.bucket_name = "invap-asistente-normas"
         os.environ["GOOGLE_API_KEY"] = api_key
-
-    # ... (El resto de tus funciones: clasificar_norma_ia, consultar_normativa_rag, etc.)
-    # Asegurate de que consultar_normativa_rag use: storage.Client(credentials=self.creds)
 
     # =========================================================
     # CLASIFICADOR INTELIGENTE
@@ -38,12 +33,11 @@ class InspeccionEngine:
             return lista_normas[0]
 
     # =========================================================
-    # MOTOR RAG (CON CREDENCIALES EN MEMORIA)
+    # MOTOR RAG MULTIMODAL (CRUZA TEXTO + IMAGEN + PDF)
     # =========================================================
-    def consultar_normativa_rag(self, norma_path, hallazgo):
-        """Descarga el PDF usando credenciales directas y procesa el RAG."""
+    def consultar_normativa_rag(self, norma_path, hallazgo, imagen_bytes=None, mime_type=None):
+        """Descarga el PDF y realiza un análisis cruzado con texto e imagen."""
         
-        # PASO CLAVE: Pasamos las credenciales al cliente de Storage
         storage_client = storage.Client(credentials=self.creds)
         bucket = storage_client.bucket(self.bucket_name)
         blob = bucket.blob(norma_path)
@@ -53,28 +47,50 @@ class InspeccionEngine:
         try:
             blob.download_to_filename(tmp_path)
             
-            # Procesamiento RAG
+            # Procesamiento RAG del PDF
             loader = PyPDFLoader(tmp_path)
             pages = loader.load_and_split()
-            
-            # Modelo de embeddings validado anteriormente
             embeddings = GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-001")
-            
             vectorstore = FAISS.from_documents(pages, embeddings)
-            docs = vectorstore.similarity_search(hallazgo, k=5)
+            
+            # Buscamos contexto en la norma (si no hay hallazgo, buscamos generalidades)
+            query_rag = hallazgo if hallazgo else "especificaciones técnicas generales de inspección"
+            docs = vectorstore.similarity_search(query_rag, k=5)
             contexto = "\n\n".join([doc.page_content for doc in docs])
 
-            # Generación de respuesta técnica
-            prompt = (
-                f"Eres un Inspector Senior de INVAP. Basado ÚNICAMENTE en el contexto "
-                f"extraído de la norma '{norma_path}':\n\n{contexto}\n\n"
-                f"Responde de forma técnica y profesional a: {hallazgo}"
+            # Construcción del Prompt Multimodal
+            prompt_tecnico = f"""
+            Actúa como Inspector Senior de INVAP. Tu tarea es generar un informe técnico integrando tres fuentes:
+            1. NORMATIVA (PDF): El contexto técnico extraído de la norma '{norma_path}'.
+            2. DESCRIPCIÓN (Texto): El hallazgo reportado por el inspector.
+            3. EVIDENCIA (Imagen): La foto adjunta del desvío (si se proporciona).
+
+            CONTEXTO DE LA NORMA:
+            {contexto}
+
+            DESCRIPCIÓN DEL HALLAZGO:
+            {hallazgo if hallazgo else "No se proporcionó descripción textual, analice la imagen."}
+
+            DICTAMEN TÉCNICO ESPERADO:
+            - Evalúe si la imagen coincide con el hallazgo y qué dice la norma al respecto.
+            - Clasifique el desvío según la gravedad técnica.
+            - Sugiera acciones correctivas basadas en la norma.
+            Responde en español profesional.
+            """
+
+            # Preparamos el contenido para Gemini (Texto + Imagen opcional)
+            contenidos = [prompt_tecnico]
+            if imagen_bytes:
+                contenidos.append(types.Part.from_bytes(data=imagen_bytes, mime_type=mime_type))
+
+            response = self.client.models.generate_content(
+                model=self.model_id, 
+                contents=contenidos
             )
-            response = self.client.models.generate_content(model=self.model_id, contents=prompt)
+            
             return response.text, norma_path
             
         finally:
-            # Limpieza de archivos temporales
             if os.path.exists(tmp_path):
                 os.remove(tmp_path)
 
