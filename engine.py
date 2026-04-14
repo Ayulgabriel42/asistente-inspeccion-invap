@@ -17,43 +17,62 @@ class InspeccionEngine:
         os.environ["GOOGLE_API_KEY"] = api_key
 
     # =========================================================
-    # CLASIFICADOR CON PRIORIDAD VISUAL (IMAGEN > TEXTO)
+    # CLASIFICADOR MULTIMODAL - CORRECCIÓN DE TIPADO BYTES
     # =========================================================
-    def clasificar_norma_ia(self, hallazgo, lista_normas, imagen_bytes=None, mime_type=None):
+    def clasificar_norma_ia(self, hallazgo, lista_normas, lista_imagenes=None):
         hallazgo_lower = hallazgo.lower()
+        
+        # PASO 1: Identificación Visual
+        contenidos_vision = ["Analiza las imágenes adjuntas e identifica el componente. Responde solo: ESLINGA, ESTRUCTURA, MECÁNICO o INSTRUMENTACIÓN."]
+        
+        if lista_imagenes:
+            for img_tuple in lista_imagenes:
+                # Aseguramos el desempaquetado manual para evitar que Pydantic reciba la tupla o lista
+                img_data = img_tuple[0]
+                img_mime = img_tuple[1]
+                contenidos_vision.append(types.Part.from_bytes(data=img_data, mime_type=img_mime))
+        
+        categoria_visual = "OTRO"
+        try:
+            res_v = self.client.models.generate_content(model=self.model_id, contents=contenidos_vision)
+            categoria_visual = res_v.text.strip().upper()
+        except: pass
+
+        # PASO 2: Filtrado de lista (Mantenemos tu lógica de negocio INVAP)
         lista_final = lista_normas.copy()
+        es_izaje = "ESLINGA" in categoria_visual or any(w in hallazgo_lower for w in ["eslinga", "cable", "izaje", "grillete"])
+        
+        if es_izaje:
+            lista_final = [n for n in lista_final if any(x in n.upper() for x in ["B30", "3914", "ESLINGA"])]
+            lista_final = [n for n in lista_final if all(x not in n.upper() for x in ["11E", "4G", "ACI"])]
+            if not lista_final: 
+                lista_final = [n for n in lista_normas if "B30" in n or "3914" in n]
 
-        # Pre-filtro lógico para asegurar que no elija normas estructurales en izaje
-        palabras_izaje = ["eslinga", "cable", "gancho", "grillete", "izaje", "tensor"]
-        if any(w in hallazgo_lower for w in palabras_izaje):
-            lista_final = [n for n in lista_final if "4G" not in n and "4g" not in n]
-
-        prompt = (
-            "Actúa como Especialista en Normativa de INVAP. "
-            "INSTRUCCIÓN CRÍTICA: La imagen adjunta es la PRIORIDAD ABSOLUTA. "
-            "Identifica el objeto físico en la imagen. Si ves una eslinga o cable, "
-            "ignora cualquier mención a estructuras mayores y elige la norma de izaje. "
-            f"Hallazgo de apoyo: '{hallazgo}'. "
-            f"Lista de PDFs autorizados: {lista_final[:50]}. "
-            "Responde ÚNICAMENTE con el nombre exacto del archivo PDF."
+        # PASO 3: Selección final
+        prompt_final = (
+            f"ERES UN EXPERTO EN INTEGRIDAD DE INVAP. Visión detectó: {categoria_visual}. "
+            f"Inspector dictó: '{hallazgo}'. Selecciona el PDF correcto: {lista_final[:30]}. "
+            "Responde ÚNICAMENTE con el nombre del archivo."
         )
         
-        contenidos = [prompt]
-        if imagen_bytes:
-            # Ponemos la imagen primero en la lista de contenidos para darle peso
-            contenidos.insert(0, types.Part.from_bytes(data=imagen_bytes, mime_type=mime_type))
-        
+        contenidos_final = [prompt_final]
+        if lista_imagenes:
+            for img_tuple in lista_imagenes:
+                # Desempaquetado explícito
+                img_data = img_tuple[0]
+                img_mime = img_tuple[1]
+                contenidos_final.append(types.Part.from_bytes(data=img_data, mime_type=img_mime))
+
         try:
-            res = self.client.models.generate_content(model=self.model_id, contents=contenidos)
+            res = self.client.models.generate_content(model=self.model_id, contents=contenidos_final)
             seleccion = res.text.strip().replace("`", "").replace("'", "")
             return seleccion if seleccion in lista_normas else lista_normas[0]
-        except:
-            return lista_normas[0]
+        except: return lista_normas[0]
 
     # =========================================================
-    # MOTOR RAG (CONEXIÓN EXPLÍCITA AL PROYECTO)
+    # MOTOR RAG MULTIMODAL - CORRECCIÓN DE TIPADO BYTES
     # =========================================================
-    def consultar_normativa_rag(self, norma_path, hallazgo, imagen_bytes=None, mime_type=None):
+    def consultar_normativa_rag(self, norma_path, hallazgo, lista_imagenes=None):
         ahora = datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S")
         storage_client = storage.Client(credentials=self.creds, project=self.project_id)
         bucket = storage_client.bucket(self.bucket_name)
@@ -64,27 +83,39 @@ class InspeccionEngine:
             blob.download_to_filename(tmp_path)
             loader = PyPDFLoader(tmp_path)
             pages = loader.load_and_split()
-            
             contexto = ""
-            if pages and any(p.page_content.strip() for p in pages):
+            if pages:
                 try:
                     embeddings = GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-001")
                     vectorstore = FAISS.from_documents(pages, embeddings)
-                    query_rag = hallazgo if hallazgo else "criterios técnicos"
-                    docs = vectorstore.similarity_search(query_rag, k=5)
+                    docs = vectorstore.similarity_search(f"criterios rechazo descarte {hallazgo}", k=6)
                     contexto = "\n\n".join([doc.page_content for doc in docs])
-                except:
-                    contexto = "Analice visualmente el PDF."
+                except: contexto = "Análisis visual directo."
 
-            prompt_tecnico = f"Inspector INVAP S.A. | Fecha: {ahora} | Norma: {norma_path} | Contexto: {contexto} | Hallazgo: {hallazgo}"
-            contenidos = [prompt_tecnico]
+            prompt_tecnico = (
+                f"SISTEMA INVAP | Fecha: {ahora} | Norma: {norma_path}\n"
+                f"CONTEXTO RAG: {contexto}\n\n"
+                "### Análisis del Hallazgo\n"
+                "**Componente:** [Identificar]\n"
+                "**Condición observada:** [Daño visto]\n\n"
+                "### Evaluación Técnica\n"
+                "[Citar norma e incumplimiento]\n\n"
+                "### Pasos a Seguir (Protocolo de Desvío)\n"
+                "1. [Seguridad] | 2. [Registro] | 3. [Remediación]\n\n"
+                f"Hallazgo original: {hallazgo}"
+            )
             
-            if not contexto or "visualmente" in contexto:
+            contenidos = [prompt_tecnico]
+            if not contexto or len(contexto) < 300:
                 with open(tmp_path, "rb") as f:
                     contenidos.append(types.Part.from_bytes(data=f.read(), mime_type="application/pdf"))
             
-            if imagen_bytes:
-                contenidos.append(types.Part.from_bytes(data=imagen_bytes, mime_type=mime_type))
+            if lista_imagenes:
+                for img_tuple in lista_imagenes:
+                    # Desempaquetado explícito
+                    img_data = img_tuple[0]
+                    img_mime = img_tuple[1]
+                    contenidos.append(types.Part.from_bytes(data=img_data, mime_type=img_mime))
 
             response = self.client.models.generate_content(model=self.model_id, contents=contenidos)
             return response.text, norma_path
