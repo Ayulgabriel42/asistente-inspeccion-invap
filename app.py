@@ -26,32 +26,288 @@ st.set_page_config(
 # =========================================================
 st.markdown("""
 <style>
+/* =========================================================
+   ESTILO PROFESIONAL INVAP - MODO CAMPO
+   Visual más limpio, sobrio y usable en campo.
+   No modifica lógica de la app.
+   ========================================================= */
+
+:root {
+    --invap-green: #007A3D;
+    --invap-green-dark: #005E31;
+    --invap-green-soft: #E8F4EE;
+    --text-main: #0F172A;
+    --text-muted: #64748B;
+    --border-soft: #D9E2E8;
+    --bg-app: #F6F8FA;
+    --bg-card: #FFFFFF;
+}
+
+/* Fondo general */
+.stApp {
+    background-color: var(--bg-app) !important;
+}
+
+/* Contenedor principal */
 .block-container {
-    padding-top: 1.2rem;
-    padding-bottom: 1.5rem;
+    padding-top: 1.4rem !important;
+    padding-bottom: 2rem !important;
+    max-width: 1180px !important;
 }
+
+/* Tipografía base */
+html, body, [class*="css"] {
+    font-size: 16px !important;
+    color: var(--text-main) !important;
+}
+
+/* Títulos */
+h1 {
+    font-size: 2.1rem !important;
+    font-weight: 800 !important;
+    color: var(--text-main) !important;
+    letter-spacing: -0.02em !important;
+    margin-bottom: 0.8rem !important;
+}
+
+h2 {
+    font-size: 1.55rem !important;
+    font-weight: 750 !important;
+    color: var(--text-main) !important;
+}
+
+h3 {
+    font-size: 1.25rem !important;
+    font-weight: 700 !important;
+    color: var(--text-main) !important;
+}
+
 .big-section-title {
-    font-size: 1.35rem;
-    font-weight: 700;
-    margin-bottom: 0.5rem;
+    font-size: 2rem !important;
+    font-weight: 800 !important;
+    color: var(--text-main) !important;
+    margin-bottom: 1rem !important;
 }
-.small-muted {
-    color: #777;
-    font-size: 0.92rem;
+
+/* Texto secundario */
+.small-muted,
+[data-testid="stCaptionContainer"],
+.stCaptionContainer {
+    color: var(--text-muted) !important;
+    font-size: 0.95rem !important;
 }
-.note-box {
-    padding: 0.7rem;
-    border-radius: 0.5rem;
-    background: rgba(120,120,120,0.08);
-    margin-bottom: 0.6rem;
+
+/* Sidebar */
+section[data-testid="stSidebar"] {
+    background: linear-gradient(180deg, #F0F8F4 0%, #E7F2EC 100%) !important;
+    border-right: 1px solid #C9DAD1 !important;
 }
+
+section[data-testid="stSidebar"] h1,
+section[data-testid="stSidebar"] h2,
+section[data-testid="stSidebar"] h3 {
+    color: var(--text-main) !important;
+}
+
+section[data-testid="stSidebar"] [role="radiogroup"] label {
+    font-size: 0.98rem !important;
+    font-weight: 600 !important;
+}
+
+/* Labels */
+label,
+.stTextInput label,
+.stTextArea label,
+.stSelectbox label,
+.stFileUploader label {
+    font-size: 0.98rem !important;
+    font-weight: 700 !important;
+    color: #1E293B !important;
+}
+
+/* Inputs */
+.stTextInput input,
+.stTextArea textarea,
+.stSelectbox div[data-baseweb="select"] > div,
+.stDateInput input,
+.stNumberInput input {
+    font-size: 1rem !important;
+    border-radius: 10px !important;
+    border: 1.5px solid #CBD5E1 !important;
+    background-color: #FFFFFF !important;
+    color: var(--text-main) !important;
+    box-shadow: none !important;
+}
+
+.stTextInput input:focus,
+.stTextArea textarea:focus,
+.stDateInput input:focus,
+.stNumberInput input:focus {
+    border: 1.5px solid var(--invap-green) !important;
+    box-shadow: 0 0 0 3px rgba(0, 122, 61, 0.12) !important;
+}
+
+.stTextInput input,
+.stDateInput input,
+.stNumberInput input {
+    min-height: 46px !important;
+    padding-left: 14px !important;
+}
+
+.stTextArea textarea {
+    min-height: 150px !important;
+    padding: 14px !important;
+    line-height: 1.45 !important;
+}
+
+/* Selectbox */
+.stSelectbox div[data-baseweb="select"] > div {
+    min-height: 48px !important;
+    display: flex !important;
+    align-items: center !important;
+}
+
+/* Botones */
+.stButton > button {
+    width: 100%;
+    min-height: 48px !important;
+    font-size: 0.98rem !important;
+    font-weight: 700 !important;
+    border-radius: 10px !important;
+    border: 1px solid var(--invap-green) !important;
+    background: var(--invap-green) !important;
+    color: #FFFFFF !important;
+    box-shadow: 0 2px 6px rgba(15, 23, 42, 0.14) !important;
+    transition: all 0.15s ease-in-out !important;
+}
+
+.stButton > button:hover {
+    background: var(--invap-green-dark) !important;
+    border-color: var(--invap-green-dark) !important;
+    color: #FFFFFF !important;
+    transform: translateY(-1px);
+}
+
+.stButton > button:active {
+    transform: translateY(0px);
+}
+
+/* Botones HTML de descarga */
+a button {
+    min-height: 48px !important;
+    font-size: 0.98rem !important;
+    font-weight: 700 !important;
+    border-radius: 10px !important;
+    box-shadow: 0 2px 6px rgba(15, 23, 42, 0.14) !important;
+}
+
+/* Tabs */
+.stTabs [data-baseweb="tab-list"] {
+    gap: 6px !important;
+    border-bottom: 1px solid var(--border-soft) !important;
+}
+
+.stTabs [data-baseweb="tab"] {
+    height: 48px !important;
+    font-size: 0.98rem !important;
+    font-weight: 700 !important;
+    background-color: #EEF2F5 !important;
+    color: #334155 !important;
+    border-radius: 10px 10px 0 0 !important;
+    padding-left: 18px !important;
+    padding-right: 18px !important;
+}
+
+.stTabs [aria-selected="true"] {
+    background-color: var(--invap-green) !important;
+    color: #FFFFFF !important;
+}
+
+/* Cajas de aviso */
 .camera-off-box {
-    padding: 0.75rem;
-    border-radius: 0.6rem;
-    background: rgba(25, 135, 84, 0.10);
-    border: 1px solid rgba(25, 135, 84, 0.25);
-    color: #155724;
-    font-size: 0.95rem;
+    padding: 0.9rem 1rem !important;
+    border-radius: 10px !important;
+    background: var(--invap-green-soft) !important;
+    border: 1px solid rgba(0, 122, 61, 0.28) !important;
+    color: #064E2B !important;
+    font-size: 0.98rem !important;
+    font-weight: 650 !important;
+    line-height: 1.45 !important;
+}
+
+.note-box {
+    padding: 0.9rem !important;
+    border-radius: 10px !important;
+    background: #FFFFFF !important;
+    border: 1px solid var(--border-soft) !important;
+    margin-bottom: 0.7rem !important;
+    box-shadow: 0 1px 4px rgba(15, 23, 42, 0.06) !important;
+}
+
+/* File uploader */
+[data-testid="stFileUploader"] {
+    background-color: #FFFFFF !important;
+    border: 1.5px dashed #94A3B8 !important;
+    border-radius: 10px !important;
+    padding: 0.9rem !important;
+}
+
+[data-testid="stFileUploader"]:hover {
+    border-color: var(--invap-green) !important;
+}
+
+/* Audio / cámara */
+[data-testid="stCameraInput"],
+[data-testid="stAudioInput"] {
+    background-color: #FFFFFF !important;
+    border: 1px solid var(--border-soft) !important;
+    border-radius: 10px !important;
+    padding: 0.9rem !important;
+}
+
+/* Alertas */
+.stAlert {
+    font-size: 0.96rem !important;
+    border-radius: 10px !important;
+    border: 1px solid var(--border-soft) !important;
+}
+
+/* Métricas */
+[data-testid="metric-container"] {
+    background-color: #FFFFFF !important;
+    border: 1px solid var(--border-soft) !important;
+    padding: 1rem !important;
+    border-radius: 12px !important;
+    box-shadow: 0 1px 5px rgba(15,23,42,0.06) !important;
+}
+
+/* Evita que todo se vea exageradamente grande */
+p, div, span {
+    line-height: 1.45;
+}
+
+/* Responsive */
+@media (max-width: 900px) {
+    .block-container {
+        padding-left: 1rem !important;
+        padding-right: 1rem !important;
+    }
+
+    h1 {
+        font-size: 1.8rem !important;
+    }
+
+    .big-section-title {
+        font-size: 1.7rem !important;
+    }
+
+    .stButton > button {
+        min-height: 52px !important;
+    }
+
+    .stTextArea textarea {
+        min-height: 140px !important;
+    }
 }
 </style>
 """, unsafe_allow_html=True)
