@@ -364,6 +364,7 @@ def init_session_state():
         "upload_reset_counter": 0,
         "audio_reset_counter": 0,
         "consulta_upload_reset_counter": 0,
+        "consulta_audio_reset_counter": 0,
         "consulta_reset_counter": 0,
         "anotacion_reset_counter": 0,
         "qa_reset_counter": 0,
@@ -379,6 +380,7 @@ def init_session_state():
         # Consultas Normativas
         "consulta_norma_input": "",
         "respuesta_consulta_norma": "",
+        "audio_consulta_procesado": False,
 
         # Anotaciones
         "anotaciones": [],
@@ -404,6 +406,7 @@ def incrementar_resets():
     st.session_state["upload_reset_counter"] += 1
     st.session_state["audio_reset_counter"] += 1
     st.session_state["consulta_upload_reset_counter"] += 1
+    st.session_state["consulta_audio_reset_counter"] += 1
     st.session_state["consulta_reset_counter"] += 1
     st.session_state["anotacion_reset_counter"] += 1
     st.session_state["qa_reset_counter"] += 1
@@ -428,12 +431,17 @@ def limpiar_inspeccion_completa():
 
 def limpiar_consulta_normativa():
     """
-    Limpia completamente la solapa Consultas Normativas.
+    Limpia completamente la solapa Consultas Normativas:
+    texto, respuesta, imagen adjunta y audio.
     """
     st.session_state["consulta_norma_input"] = ""
     st.session_state["respuesta_consulta_norma"] = ""
+    st.session_state["audio_consulta_procesado"] = False
+
     st.session_state["consulta_upload_reset_counter"] += 1
+    st.session_state["consulta_audio_reset_counter"] += 1
     st.session_state["consulta_reset_counter"] += 1
+
     st.rerun()
 
 
@@ -656,9 +664,6 @@ elif st.session_state["menu_principal"] == "Asistente de Inspección":
 
             st.write("---")
 
-            # ---------------------------
-            # SWITCH DE CÁMARA
-            # ---------------------------
             cam_toggle_key = f"activar_camara_{st.session_state['camara_reset_counter']}"
             usar_camara = st.toggle(
                 "📷 Activar cámara para capturar evidencia",
@@ -774,11 +779,43 @@ elif st.session_state["menu_principal"] == "Asistente de Inspección":
     # -----------------------------------------------------
     with subtab2:
         st.subheader("Consultas Normativas")
-        st.caption("Realice una consulta libre para orientarse sobre en qué norma podría encuadrarse un caso.")
+        st.caption(
+            "Realice una consulta libre por texto, audio o imagen para orientarse "
+            "sobre en qué norma podría encuadrarse un caso."
+        )
+
+        st.markdown("#### Entrada por audio")
+
+        audio_consulta_key = f"audio_consulta_{st.session_state['consulta_audio_reset_counter']}"
+        audio_consulta = st.audio_input(
+            "Dictar consulta normativa",
+            key=audio_consulta_key
+        )
+
+        if audio_consulta and not st.session_state.get("audio_consulta_procesado", False):
+            try:
+                with st.spinner("Transcribiendo consulta normativa..."):
+                    audio_bytes = audio_consulta.getvalue()
+
+                    texto_transcripto = st.session_state["motor"].transcribir_audio(
+                        audio_bytes,
+                        audio_consulta.type
+                    )
+
+                    st.session_state["consulta_norma_input"] = texto_transcripto
+                    st.session_state["audio_consulta_procesado"] = True
+                    st.session_state["consulta_reset_counter"] += 1
+
+                    st.rerun()
+
+            except Exception as e:
+                st.error(f"No se pudo transcribir la consulta normativa: {e}")
+
+        st.markdown("#### Entrada manual")
 
         pregunta_key = f"consulta_norma_text_area_{st.session_state['consulta_reset_counter']}"
         pregunta = st.text_area(
-            "Escriba su consulta",
+            "Escriba o revise su consulta",
             value=st.session_state.get("consulta_norma_input", ""),
             height=130,
             placeholder="Ej.: ¿Qué norma podría aplicar si se detectan alambres cortados en una eslinga?",
@@ -786,6 +823,8 @@ elif st.session_state["menu_principal"] == "Asistente de Inspección":
         )
 
         st.session_state["consulta_norma_input"] = pregunta
+
+        st.markdown("#### Evidencia visual opcional")
 
         consulta_up_key = f"consulta_file_uploader_{st.session_state['consulta_upload_reset_counter']}"
         consulta_img = st.file_uploader(
@@ -808,8 +847,8 @@ elif st.session_state["menu_principal"] == "Asistente de Inspección":
 
         with col_cons_1:
             if st.button("📚 CONSULTAR NORMA", width="stretch"):
-                if not pregunta.strip():
-                    st.warning("Ingrese una consulta.")
+                if not pregunta.strip() and not lista_imgs_consulta:
+                    st.warning("Ingrese una consulta por texto/audio o adjunte una imagen.")
                 else:
                     st.session_state["consulta_norma_input"] = pregunta
                     try:
@@ -868,8 +907,6 @@ elif st.session_state["menu_principal"] == "Asistente de Inspección":
 
                     st.session_state["texto_anotacion"] = texto_transcripto
                     st.session_state["audio_anotacion_procesado"] = True
-
-                    # Fuerza a reconstruir el text_area para que tome el texto transcripto
                     st.session_state["anotacion_reset_counter"] += 1
 
                     st.rerun()
@@ -901,7 +938,6 @@ elif st.session_state["menu_principal"] == "Asistente de Inspección":
                         "fecha": datetime.datetime.now().strftime("%d/%m/%Y %H:%M"),
                         "texto": nueva_nota.strip()
                     })
-
                     st.session_state["texto_anotacion"] = ""
                     st.session_state["audio_anotacion_procesado"] = False
                     st.session_state["anotacion_reset_counter"] += 1
@@ -931,19 +967,19 @@ elif st.session_state["menu_principal"] == "Asistente de Inspección":
 
         if st.session_state["anotaciones"]:
             st.markdown("### Historial")
-
             for i, nota in enumerate(st.session_state["anotaciones"], start=1):
-                with st.container():
-                    st.markdown(
-                        f"""
-                        <div class="note-box">
-                            <b>Nota {i}</b><br>
-                            <span class="small-muted">{nota.get("fecha", "")}</span><br><br>
-                            {nota.get("texto", "")}
-                        </div>
-                        """,
-                        unsafe_allow_html=True
-                    )
+                fecha_nota = nota.get("fecha", "")
+                texto_nota = nota.get("texto", "")
+                st.markdown(
+                    f"""
+                    <div class="note-box">
+                        <strong>Nota {i}</strong><br>
+                        <span class="small-muted">{fecha_nota}</span>
+                        <p>{texto_nota}</p>
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
         else:
             st.info("Todavía no hay anotaciones cargadas.")
 
@@ -952,7 +988,7 @@ elif st.session_state["menu_principal"] == "Asistente de Inspección":
 # MÓDULO: QA / AUDITORÍA
 # =========================================================
 elif st.session_state["menu_principal"] == "QA / Auditoría":
-    st.markdown('<div class="big-section-title">🔍 QA / Auditoría</div>', unsafe_allow_html=True)
+    st.markdown('<div class="big-section-title">🧪 QA / Auditoría</div>', unsafe_allow_html=True)
 
     st.subheader("Agente de Auditoría QA")
     st.write("Cargue un reporte PDF para validar consistencia técnica.")
@@ -970,7 +1006,7 @@ elif st.session_state["menu_principal"] == "QA / Auditoría":
         height=120
     )
 
-    if st.button("🔍 AUDITAR REPORTE", width="stretch"):
+    if st.button("🧪 AUDITAR REPORTE", width="stretch"):
         if not pdf_qa:
             st.warning("Suba un PDF para auditar.")
         else:
