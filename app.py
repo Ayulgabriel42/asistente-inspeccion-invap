@@ -1,9 +1,13 @@
 import os
+import re
+import json
+import uuid
 import base64
 import datetime
+import unicodedata
+
 import streamlit as st
 import pandas as pd
-import numpy as np
 
 from google.cloud import storage
 from google.oauth2 import service_account
@@ -14,6 +18,65 @@ from engine import InspeccionEngine
 # =========================================================
 # CONFIGURACIÓN GENERAL
 # =========================================================
+BUCKET_NAME = "invap-asistente-normas"
+REGISTROS_PREFIX = "registros_inspecciones"
+
+CLIENTES_COMODORO = [
+    "DLS - Nova Energy",
+    "Clear Petrolum",
+    "San Antonio International",
+    "AESA",
+    "Pan American Energy",
+    "Halliburton",
+    "Tecpetrol",
+    "Venver",
+    "Otro"
+]
+
+REGIONES = [
+    "Comodoro Rivadavia",
+    "Neuquén",
+    "Bariloche",
+    "Otra"
+]
+
+TIPOS_EQUIPO = [
+    "Pulling",
+    "Workover",
+    "Perforación",
+    "Carretón",
+    "BOP",
+    "Acumulador",
+    "Bomba de lodo",
+    "Otro"
+]
+
+SISTEMAS_AFECTADOS = [
+    "Estructura",
+    "Sistema de izaje",
+    "Control de pozo",
+    "Bombas de lodo",
+    "Seguridad",
+    "Cuadro de maniobras",
+    "Mesa rotary",
+    "Sistema de potencia",
+    "Otro"
+]
+
+CRITICIDADES = [
+    "Crítico",
+    "Alto",
+    "Medio",
+    "Bajo"
+]
+
+ESTADOS_GESTION = [
+    "Pendiente",
+    "En análisis",
+    "Cerrado"
+]
+
+
 st.set_page_config(
     page_title="INVAP - Sistema Inteligente de Integridad",
     page_icon="⚙️",
@@ -26,12 +89,6 @@ st.set_page_config(
 # =========================================================
 st.markdown("""
 <style>
-/* =========================================================
-   ESTILO PROFESIONAL INVAP - MODO CAMPO
-   Visual más limpio, sobrio y usable en campo.
-   No modifica lógica de la app.
-   ========================================================= */
-
 :root {
     --invap-green: #007A3D;
     --invap-green-dark: #005E31;
@@ -41,27 +98,27 @@ st.markdown("""
     --border-soft: #D9E2E8;
     --bg-app: #F6F8FA;
     --bg-card: #FFFFFF;
+    --danger-soft: #FEE2E2;
+    --danger-text: #7F1D1D;
+    --warning-soft: #FEF3C7;
+    --warning-text: #78350F;
 }
 
-/* Fondo general */
 .stApp {
     background-color: var(--bg-app) !important;
 }
 
-/* Contenedor principal */
 .block-container {
     padding-top: 1.4rem !important;
     padding-bottom: 2rem !important;
     max-width: 1180px !important;
 }
 
-/* Tipografía base */
 html, body, [class*="css"] {
     font-size: 16px !important;
     color: var(--text-main) !important;
 }
 
-/* Títulos */
 h1 {
     font-size: 2.1rem !important;
     font-weight: 800 !important;
@@ -89,7 +146,6 @@ h3 {
     margin-bottom: 1rem !important;
 }
 
-/* Texto secundario */
 .small-muted,
 [data-testid="stCaptionContainer"],
 .stCaptionContainer {
@@ -97,7 +153,6 @@ h3 {
     font-size: 0.95rem !important;
 }
 
-/* Sidebar */
 section[data-testid="stSidebar"] {
     background: linear-gradient(180deg, #F0F8F4 0%, #E7F2EC 100%) !important;
     border-right: 1px solid #C9DAD1 !important;
@@ -114,7 +169,6 @@ section[data-testid="stSidebar"] [role="radiogroup"] label {
     font-weight: 600 !important;
 }
 
-/* Labels */
 label,
 .stTextInput label,
 .stTextArea label,
@@ -125,7 +179,6 @@ label,
     color: #1E293B !important;
 }
 
-/* Inputs */
 .stTextInput input,
 .stTextArea textarea,
 .stSelectbox div[data-baseweb="select"] > div,
@@ -160,14 +213,12 @@ label,
     line-height: 1.45 !important;
 }
 
-/* Selectbox */
 .stSelectbox div[data-baseweb="select"] > div {
     min-height: 48px !important;
     display: flex !important;
     align-items: center !important;
 }
 
-/* Botones */
 .stButton > button {
     width: 100%;
     min-height: 48px !important;
@@ -192,7 +243,6 @@ label,
     transform: translateY(0px);
 }
 
-/* Botones HTML de descarga */
 a button {
     min-height: 48px !important;
     font-size: 0.98rem !important;
@@ -201,7 +251,6 @@ a button {
     box-shadow: 0 2px 6px rgba(15, 23, 42, 0.14) !important;
 }
 
-/* Tabs */
 .stTabs [data-baseweb="tab-list"] {
     gap: 6px !important;
     border-bottom: 1px solid var(--border-soft) !important;
@@ -223,7 +272,6 @@ a button {
     color: #FFFFFF !important;
 }
 
-/* Cajas de aviso */
 .camera-off-box {
     padding: 0.9rem 1rem !important;
     border-radius: 10px !important;
@@ -244,7 +292,35 @@ a button {
     box-shadow: 0 1px 4px rgba(15, 23, 42, 0.06) !important;
 }
 
-/* File uploader */
+.attention-card {
+    padding: 1rem !important;
+    border-radius: 12px !important;
+    background: #FFFFFF !important;
+    border: 1px solid var(--border-soft) !important;
+    box-shadow: 0 1px 5px rgba(15,23,42,0.06) !important;
+    margin-bottom: 0.7rem !important;
+}
+
+.attention-critical {
+    border-left: 6px solid #DC2626 !important;
+}
+
+.attention-warning {
+    border-left: 6px solid #F59E0B !important;
+}
+
+.attention-ok {
+    border-left: 6px solid var(--invap-green) !important;
+}
+
+.dashboard-box {
+    padding: 1rem !important;
+    border-radius: 12px !important;
+    background: #FFFFFF !important;
+    border: 1px solid var(--border-soft) !important;
+    box-shadow: 0 1px 5px rgba(15,23,42,0.06) !important;
+}
+
 [data-testid="stFileUploader"] {
     background-color: #FFFFFF !important;
     border: 1.5px dashed #94A3B8 !important;
@@ -256,7 +332,6 @@ a button {
     border-color: var(--invap-green) !important;
 }
 
-/* Audio / cámara */
 [data-testid="stCameraInput"],
 [data-testid="stAudioInput"] {
     background-color: #FFFFFF !important;
@@ -265,14 +340,12 @@ a button {
     padding: 0.9rem !important;
 }
 
-/* Alertas */
 .stAlert {
     font-size: 0.96rem !important;
     border-radius: 10px !important;
     border: 1px solid var(--border-soft) !important;
 }
 
-/* Métricas */
 [data-testid="metric-container"] {
     background-color: #FFFFFF !important;
     border: 1px solid var(--border-soft) !important;
@@ -281,12 +354,10 @@ a button {
     box-shadow: 0 1px 5px rgba(15,23,42,0.06) !important;
 }
 
-/* Evita que todo se vea exageradamente grande */
 p, div, span {
     line-height: 1.45;
 }
 
-/* Responsive */
 @media (max-width: 900px) {
     .block-container {
         padding-left: 1rem !important;
@@ -330,25 +401,176 @@ def get_creds():
     return creds, project_id
 
 
+def get_storage_client(creds, project_id):
+    if creds:
+        return storage.Client(credentials=creds, project=project_id)
+
+    if project_id:
+        return storage.Client(project=project_id)
+
+    return storage.Client()
+
+
 def cargar_lista_normas(creds, project_id):
     try:
-        client = storage.Client(credentials=creds, project=project_id)
-        blobs = client.list_blobs("invap-asistente-normas")
+        client = get_storage_client(creds, project_id)
+        blobs = client.list_blobs(BUCKET_NAME)
         return [blob.name for blob in blobs if blob.name.lower().endswith(".pdf")]
     except Exception:
         return []
 
 
 def nombre_norma_limpio(norma_path):
-    """
-    Limpia la ruta de la norma para mostrar solo el nombre del archivo.
-    Ejemplo:
-    API/API - 16D - 2005.pdf -> API - 16D - 2005.pdf
-    """
     if not norma_path:
         return "No determinada"
 
     return str(norma_path).split("/")[-1]
+
+
+def sanitizar_para_archivo(texto):
+    if not texto:
+        return "sin_equipo"
+
+    texto = str(texto)
+    texto = unicodedata.normalize("NFKD", texto)
+    texto = "".join(c for c in texto if not unicodedata.combining(c))
+    texto = texto.upper()
+    texto = re.sub(r"[^A-Z0-9]+", "_", texto)
+    texto = texto.strip("_")
+
+    return texto[:40] if texto else "sin_equipo"
+
+
+def generar_id_informe(equipo):
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    equipo_limpio = sanitizar_para_archivo(equipo)
+    corto = uuid.uuid4().hex[:6].upper()
+    return f"INS-{timestamp}-{equipo_limpio}-{corto}"
+
+
+def guardar_registro_inspeccion(creds, project_id, registro):
+    client = get_storage_client(creds, project_id)
+    bucket = client.bucket(BUCKET_NAME)
+
+    fecha = datetime.datetime.now()
+    id_informe = registro["id_informe"]
+
+    ruta = (
+        f"{REGISTROS_PREFIX}/"
+        f"{fecha.strftime('%Y')}/"
+        f"{fecha.strftime('%m')}/"
+        f"{fecha.strftime('%d')}/"
+        f"{id_informe}.json"
+    )
+
+    blob = bucket.blob(ruta)
+    blob.upload_from_string(
+        json.dumps(registro, ensure_ascii=False, indent=2),
+        content_type="application/json"
+    )
+
+    return ruta
+
+
+def cargar_registros_inspeccion(creds, project_id):
+    registros = []
+
+    try:
+        client = get_storage_client(creds, project_id)
+        blobs = client.list_blobs(BUCKET_NAME, prefix=f"{REGISTROS_PREFIX}/")
+
+        for blob in blobs:
+            if not blob.name.lower().endswith(".json"):
+                continue
+
+            try:
+                contenido = blob.download_as_text(encoding="utf-8")
+                item = json.loads(contenido)
+                item["_ruta_gcs"] = blob.name
+                registros.append(item)
+            except Exception:
+                continue
+
+    except Exception:
+        return []
+
+    return registros
+
+
+def registros_a_dataframe(registros):
+    columnas = [
+        "id_informe",
+        "fecha_hora",
+        "region",
+        "cliente",
+        "equipo",
+        "tipo_equipo",
+        "sistema_afectado",
+        "criticidad",
+        "estado",
+        "norma_detectada",
+        "hallazgo_original",
+        "informe_generado",
+        "cantidad_imagenes",
+        "_ruta_gcs"
+    ]
+
+    if not registros:
+        return pd.DataFrame(columns=columnas)
+
+    df = pd.DataFrame(registros)
+
+    for col in columnas:
+        if col not in df.columns:
+            df[col] = None
+
+    df["fecha_dt"] = pd.to_datetime(df["fecha_hora"], errors="coerce")
+    df = df.sort_values("fecha_dt", ascending=False, na_position="last")
+
+    return df
+
+
+def index_seguro(opciones, valor, defecto=0):
+    try:
+        return opciones.index(valor)
+    except Exception:
+        return defecto
+
+
+def validar_contexto_archivo(contexto, hallazgo, informe, norma):
+    faltantes = []
+
+    if not contexto.get("region"):
+        faltantes.append("Región / Base")
+
+    if not contexto.get("cliente"):
+        faltantes.append("Cliente")
+
+    if not contexto.get("equipo"):
+        faltantes.append("Equipo")
+
+    if not contexto.get("tipo_equipo"):
+        faltantes.append("Tipo de equipo")
+
+    if not contexto.get("sistema_afectado"):
+        faltantes.append("Sistema afectado")
+
+    if not contexto.get("criticidad"):
+        faltantes.append("Criticidad")
+
+    if not contexto.get("estado"):
+        faltantes.append("Estado")
+
+    if not hallazgo:
+        faltantes.append("Hallazgo original")
+
+    if not informe:
+        faltantes.append("Informe generado")
+
+    if not norma:
+        faltantes.append("Norma detectada")
+
+    return faltantes
 
 
 def init_session_state():
@@ -368,6 +590,19 @@ def init_session_state():
         "consulta_reset_counter": 0,
         "anotacion_reset_counter": 0,
         "qa_reset_counter": 0,
+
+        # Datos de inspección
+        "region_inspeccion": "Comodoro Rivadavia",
+        "cliente_inspeccion": "DLS - Nova Energy",
+        "cliente_manual_inspeccion": "",
+        "cliente_otro_inspeccion": "",
+        "equipo_inspeccion": "",
+        "tipo_equipo_inspeccion": "Workover",
+        "sistema_afectado_inspeccion": "Estructura",
+        "criticidad_inspeccion": "Medio",
+        "estado_inspeccion": "Pendiente",
+        "contexto_inspeccion_actual": {},
+        "ruta_ultimo_archivo": "",
 
         # Registro de Hallazgo
         "input_hallazgo_usuario": "",
@@ -397,10 +632,6 @@ def init_session_state():
 
 
 def incrementar_resets():
-    """
-    Fuerza a Streamlit a reconstruir widgets que no se limpian solo con borrar texto:
-    cámara, audio, file_uploader, inputs, etc.
-    """
     st.session_state["reset_global_counter"] += 1
     st.session_state["camara_reset_counter"] += 1
     st.session_state["upload_reset_counter"] += 1
@@ -413,27 +644,19 @@ def incrementar_resets():
 
 
 def limpiar_inspeccion_completa():
-    """
-    Resetea todo lo relacionado con el informe/inspección actual:
-    texto, audio, informe, norma, imágenes y widgets.
-    No borra anotaciones históricas; para eso está el botón específico.
-    """
     st.session_state["input_hallazgo_usuario"] = ""
     st.session_state["audio_procesado"] = False
     st.session_state["ultimo_informe"] = None
     st.session_state["norma_actual"] = None
     st.session_state["hallazgo_actual"] = ""
     st.session_state["imagenes_actuales"] = []
+    st.session_state["ruta_ultimo_archivo"] = ""
 
     incrementar_resets()
     st.rerun()
 
 
 def limpiar_consulta_normativa():
-    """
-    Limpia completamente la solapa Consultas Normativas:
-    texto, respuesta, imagen adjunta y audio.
-    """
     st.session_state["consulta_norma_input"] = ""
     st.session_state["respuesta_consulta_norma"] = ""
     st.session_state["audio_consulta_procesado"] = False
@@ -446,9 +669,6 @@ def limpiar_consulta_normativa():
 
 
 def limpiar_anotaciones_completas():
-    """
-    Borra todas las anotaciones y también limpia audio/texto de entrada.
-    """
     st.session_state["anotaciones"] = []
     st.session_state["texto_anotacion"] = ""
     st.session_state["audio_anotacion_procesado"] = False
@@ -457,9 +677,6 @@ def limpiar_anotaciones_completas():
 
 
 def limpiar_entrada_anotacion():
-    """
-    Limpia solo el campo de nueva anotación y su audio.
-    """
     st.session_state["texto_anotacion"] = ""
     st.session_state["audio_anotacion_procesado"] = False
     st.session_state["anotacion_reset_counter"] += 1
@@ -531,6 +748,207 @@ def anotaciones_a_markdown(anotaciones):
     return "\n".join(lineas)
 
 
+def render_dashboard(df):
+    st.markdown('<div class="big-section-title">📊 Dashboard operativo</div>', unsafe_allow_html=True)
+    st.caption(
+        "Indicadores construidos únicamente a partir de informes archivados por los usuarios. "
+        "No se utilizan datos simulados."
+    )
+
+    if df.empty:
+        st.info(
+            "Todavía no hay informes archivados. Genere un informe desde "
+            "'Asistente de Inspección' y presione 'ARCHIVAR INFORME' para comenzar a construir el Dashboard."
+        )
+        return
+
+    st.markdown("### Filtros")
+
+    col_f1, col_f2, col_f3, col_f4 = st.columns(4)
+
+    regiones = ["Todas"] + sorted([x for x in df["region"].dropna().unique().tolist() if x])
+    clientes = ["Todos"] + sorted([x for x in df["cliente"].dropna().unique().tolist() if x])
+    sistemas = ["Todos"] + sorted([x for x in df["sistema_afectado"].dropna().unique().tolist() if x])
+    criticidades = ["Todas"] + sorted([x for x in df["criticidad"].dropna().unique().tolist() if x])
+
+    with col_f1:
+        filtro_region = st.selectbox("Región / Base", regiones)
+
+    with col_f2:
+        filtro_cliente = st.selectbox("Cliente", clientes)
+
+    with col_f3:
+        filtro_sistema = st.selectbox("Sistema", sistemas)
+
+    with col_f4:
+        filtro_criticidad = st.selectbox("Criticidad", criticidades)
+
+    df_f = df.copy()
+
+    if filtro_region != "Todas":
+        df_f = df_f[df_f["region"] == filtro_region]
+
+    if filtro_cliente != "Todos":
+        df_f = df_f[df_f["cliente"] == filtro_cliente]
+
+    if filtro_sistema != "Todos":
+        df_f = df_f[df_f["sistema_afectado"] == filtro_sistema]
+
+    if filtro_criticidad != "Todas":
+        df_f = df_f[df_f["criticidad"] == filtro_criticidad]
+
+    if df_f.empty:
+        st.warning("No hay registros para los filtros seleccionados.")
+        return
+
+    total = len(df_f)
+    criticos_abiertos = len(df_f[(df_f["criticidad"] == "Crítico") & (df_f["estado"] != "Cerrado")])
+    pendientes = len(df_f[df_f["estado"] != "Cerrado"])
+    equipos_afectados = df_f["equipo"].nunique()
+    regiones_activas = df_f["region"].nunique()
+
+    st.write("")
+    st.markdown("### Indicadores principales")
+
+    m1, m2, m3, m4, m5 = st.columns(5)
+    m1.metric("Informes archivados", total)
+    m2.metric("Críticos abiertos", criticos_abiertos)
+    m3.metric("Pendientes / análisis", pendientes)
+    m4.metric("Equipos afectados", equipos_afectados)
+    m5.metric("Regiones activas", regiones_activas)
+
+    st.write("")
+    st.markdown("### 🔴 Atención hoy")
+
+    if criticos_abiertos > 0:
+        st.markdown(
+            f"""
+            <div class="attention-card attention-critical">
+                <strong>Hallazgos críticos abiertos</strong><br>
+                Existen <strong>{criticos_abiertos}</strong> hallazgos críticos sin cierre.
+                Se recomienda priorizar revisión técnica y seguimiento documental.
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+    else:
+        st.markdown(
+            """
+            <div class="attention-card attention-ok">
+                <strong>Sin críticos abiertos</strong><br>
+                No se registran hallazgos críticos pendientes bajo los filtros seleccionados.
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+    if pendientes > 0:
+        sistema_top = df_f[df_f["estado"] != "Cerrado"]["sistema_afectado"].value_counts()
+        if not sistema_top.empty:
+            st.markdown(
+                f"""
+                <div class="attention-card attention-warning">
+                    <strong>Sistema con mayor carga pendiente</strong><br>
+                    El sistema con más hallazgos sin cierre es
+                    <strong>{sistema_top.index[0]}</strong>, con <strong>{int(sistema_top.iloc[0])}</strong> registros.
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+
+    region_top = df_f["region"].value_counts()
+    if not region_top.empty:
+        st.markdown(
+            f"""
+            <div class="attention-card">
+                <strong>Mayor concentración por región/base</strong><br>
+                La mayor cantidad de registros corresponde a
+                <strong>{region_top.index[0]}</strong>, con <strong>{int(region_top.iloc[0])}</strong> informes archivados.
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+    st.write("")
+    col_g1, col_g2 = st.columns(2)
+
+    with col_g1:
+        st.markdown("### Hallazgos por sistema")
+        sistema_counts = df_f["sistema_afectado"].value_counts()
+        if not sistema_counts.empty:
+            st.bar_chart(sistema_counts, height=280)
+        else:
+            st.info("Sin datos de sistema.")
+
+    with col_g2:
+        st.markdown("### Hallazgos por región")
+        region_counts = df_f["region"].value_counts()
+        if not region_counts.empty:
+            st.bar_chart(region_counts, height=280)
+        else:
+            st.info("Sin datos de región.")
+
+    col_g3, col_g4 = st.columns(2)
+
+    with col_g3:
+        st.markdown("### Estado de gestión")
+        estado_counts = df_f["estado"].value_counts()
+        if not estado_counts.empty:
+            st.bar_chart(estado_counts, height=260)
+        else:
+            st.info("Sin datos de estado.")
+
+    with col_g4:
+        st.markdown("### Normas más utilizadas")
+        normas_counts = df_f["norma_detectada"].dropna().apply(nombre_norma_limpio).value_counts().head(10)
+        if not normas_counts.empty:
+            st.bar_chart(normas_counts, height=260)
+        else:
+            st.info("Sin datos de normas.")
+
+    st.write("")
+    st.markdown("### Últimos informes archivados")
+
+    tabla = df_f[[
+        "fecha_hora",
+        "region",
+        "cliente",
+        "equipo",
+        "tipo_equipo",
+        "sistema_afectado",
+        "criticidad",
+        "estado",
+        "norma_detectada"
+    ]].copy()
+
+    tabla["norma_detectada"] = tabla["norma_detectada"].apply(nombre_norma_limpio)
+
+    st.dataframe(
+        tabla.head(30),
+        width="stretch",
+        hide_index=True
+    )
+
+    st.write("")
+    with st.expander("Ver detalle técnico de registros filtrados"):
+        detalle = df_f[[
+            "id_informe",
+            "fecha_hora",
+            "region",
+            "cliente",
+            "equipo",
+            "hallazgo_original",
+            "informe_generado",
+            "_ruta_gcs"
+        ]].copy()
+
+        st.dataframe(
+            detalle,
+            width="stretch",
+            hide_index=True
+        )
+
+
 # =========================================================
 # INICIALIZACIÓN
 # =========================================================
@@ -573,6 +991,9 @@ with st.sidebar:
     st.write("---")
     st.caption("Sistema inteligente de apoyo técnico para inspecciones de campo.")
 
+    if st.button("🔄 Actualizar datos", width="stretch"):
+        st.rerun()
+
 
 # =========================================================
 # CABECERA
@@ -587,31 +1008,16 @@ with col_logo:
 
 with col_title:
     st.title("Sistema Inteligente de Gestión de Integridad")
-    st.caption("Asistencia técnica para hallazgos, consultas normativas y auditoría documental")
+    st.caption("Asistencia técnica para hallazgos, consultas normativas, archivo de informes y auditoría documental")
 
 
 # =========================================================
 # MÓDULO: DASHBOARD
 # =========================================================
 if st.session_state["menu_principal"] == "Dashboard":
-    st.markdown('<div class="big-section-title">📊 Dashboard</div>', unsafe_allow_html=True)
-
-    m1, m2, m3 = st.columns(3)
-    m1.metric("Inspecciones Totales", "1.242", "+12%")
-    m2.metric("Alertas Críticas", "14", "⚠️")
-    m3.metric("Efectividad IA", "99,1%", "🎯")
-
-    st.write("")
-
-    st.subheader("Tendencias")
-    df = pd.DataFrame(
-        np.random.randn(20, 3),
-        columns=["Mantenimiento", "Corrosión", "Soldadura"]
-    )
-    st.area_chart(df)
-
-    st.write("")
-    st.info("Este panel puede crecer después con métricas reales, histórico de hallazgos y KPIs de desvíos.")
+    registros = cargar_registros_inspeccion(creds, project_id)
+    df_registros = registros_a_dataframe(registros)
+    render_dashboard(df_registros)
 
 
 # =========================================================
@@ -633,6 +1039,87 @@ elif st.session_state["menu_principal"] == "Asistente de Inspección":
         c1, c2 = st.columns([1, 2])
 
         with c1:
+            st.subheader("Datos de inspección")
+
+            region = st.selectbox(
+                "Región / Base",
+                REGIONES,
+                index=index_seguro(REGIONES, st.session_state.get("region_inspeccion", "Comodoro Rivadavia")),
+                key="region_inspeccion"
+            )
+
+            if region == "Comodoro Rivadavia":
+                if st.session_state.get("cliente_inspeccion") not in CLIENTES_COMODORO:
+                    st.session_state["cliente_inspeccion"] = "DLS - Nova Energy"
+
+                cliente_seleccionado = st.selectbox(
+                    "Cliente",
+                    CLIENTES_COMODORO,
+                    index=index_seguro(CLIENTES_COMODORO, st.session_state.get("cliente_inspeccion", "DLS - Nova Energy")),
+                    key="cliente_inspeccion"
+                )
+
+                if cliente_seleccionado == "Otro":
+                    cliente_final = st.text_input(
+                        "Especificar cliente",
+                        key="cliente_otro_inspeccion",
+                        placeholder="Ingrese cliente"
+                    ).strip()
+                else:
+                    cliente_final = cliente_seleccionado
+            else:
+                st.caption("Para Neuquén, Bariloche u otra región, el cliente se ingresa manualmente hasta cargar catálogos reales.")
+                cliente_final = st.text_input(
+                    "Cliente",
+                    key="cliente_manual_inspeccion",
+                    placeholder="Ej.: YPF, PAE, empresa local..."
+                ).strip()
+
+            equipo = st.text_input(
+                "Equipo / Identificación",
+                key="equipo_inspeccion",
+                placeholder="Ej.: DLS-343, PAE-007, SAI-212"
+            ).strip()
+
+            tipo_equipo = st.selectbox(
+                "Tipo de equipo",
+                TIPOS_EQUIPO,
+                index=index_seguro(TIPOS_EQUIPO, st.session_state.get("tipo_equipo_inspeccion", "Workover")),
+                key="tipo_equipo_inspeccion"
+            )
+
+            sistema_afectado = st.selectbox(
+                "Sistema afectado",
+                SISTEMAS_AFECTADOS,
+                index=index_seguro(SISTEMAS_AFECTADOS, st.session_state.get("sistema_afectado_inspeccion", "Estructura")),
+                key="sistema_afectado_inspeccion"
+            )
+
+            criticidad = st.selectbox(
+                "Criticidad",
+                CRITICIDADES,
+                index=index_seguro(CRITICIDADES, st.session_state.get("criticidad_inspeccion", "Medio")),
+                key="criticidad_inspeccion"
+            )
+
+            estado = st.selectbox(
+                "Estado de gestión",
+                ESTADOS_GESTION,
+                index=index_seguro(ESTADOS_GESTION, st.session_state.get("estado_inspeccion", "Pendiente")),
+                key="estado_inspeccion"
+            )
+
+            st.session_state["contexto_inspeccion_actual"] = {
+                "region": region,
+                "cliente": cliente_final,
+                "equipo": equipo,
+                "tipo_equipo": tipo_equipo,
+                "sistema_afectado": sistema_afectado,
+                "criticidad": criticidad,
+                "estado": estado
+            }
+
+            st.write("---")
             st.subheader("Registro")
 
             audio_key = f"audio_hallazgo_{st.session_state['audio_reset_counter']}"
@@ -733,23 +1220,32 @@ elif st.session_state["menu_principal"] == "Asistente de Inspección":
                             st.session_state["ultimo_informe"] = res
                             st.session_state["norma_actual"] = ref
                             st.session_state["hallazgo_actual"] = hallazgo
+                            st.session_state["ruta_ultimo_archivo"] = ""
 
                     except Exception as e:
                         st.error(f"No se pudo generar el informe técnico: {e}")
 
-            st.write("")
             st.write("")
 
             if st.button("🔄 NUEVA INSPECCIÓN", width="stretch"):
                 limpiar_inspeccion_completa()
 
         with c2:
-            st.subheader("Previsualización y Refinamiento")
+            st.subheader("Previsualización, Refinamiento y Archivo")
 
             if st.session_state.get("ultimo_informe"):
                 norma_visible = nombre_norma_limpio(st.session_state.get("norma_actual"))
 
-                st.info(f"**Norma detectada:** {norma_visible}")
+                contexto = st.session_state.get("contexto_inspeccion_actual", {})
+
+                st.info(
+                    f"**Norma detectada:** {norma_visible}  \n"
+                    f"**Región:** {contexto.get('region', '')} | "
+                    f"**Cliente:** {contexto.get('cliente', '')} | "
+                    f"**Equipo:** {contexto.get('equipo', '')} | "
+                    f"**Criticidad:** {contexto.get('criticidad', '')}"
+                )
+
                 st.markdown(st.session_state["ultimo_informe"])
                 st.write("---")
 
@@ -766,11 +1262,70 @@ elif st.session_state["menu_principal"] == "Asistente de Inspección":
                     except Exception as e:
                         st.error(f"No se pudo refinar el informe: {e}")
 
-                generar_descarga_txt(
-                    nombre_base="Informe_INVAP",
-                    contenido=st.session_state["ultimo_informe"],
-                    label="💾 DESCARGAR INFORME"
-                )
+                col_down, col_archive = st.columns([1, 1])
+
+                with col_down:
+                    generar_descarga_txt(
+                        nombre_base="Informe_INVAP",
+                        contenido=st.session_state["ultimo_informe"],
+                        label="💾 DESCARGAR INFORME"
+                    )
+
+                with col_archive:
+                    if st.button("📁 ARCHIVAR INFORME", width="stretch"):
+                        contexto = st.session_state.get("contexto_inspeccion_actual", {})
+                        hallazgo_final = st.session_state.get("hallazgo_actual") or st.session_state.get("input_hallazgo_usuario", "")
+                        informe_final = st.session_state.get("ultimo_informe", "")
+                        norma_final = st.session_state.get("norma_actual", "")
+
+                        faltantes = validar_contexto_archivo(
+                            contexto=contexto,
+                            hallazgo=hallazgo_final,
+                            informe=informe_final,
+                            norma=norma_final
+                        )
+
+                        if faltantes:
+                            st.warning(
+                                "Antes de archivar complete: "
+                                + ", ".join(faltantes)
+                            )
+                        else:
+                            try:
+                                with st.spinner("Archivando informe en Google Cloud Storage..."):
+                                    ahora = datetime.datetime.now()
+                                    id_informe = generar_id_informe(contexto.get("equipo", ""))
+
+                                    registro = {
+                                        "id_informe": id_informe,
+                                        "fecha_hora": ahora.strftime("%Y-%m-%d %H:%M:%S"),
+                                        "region": contexto.get("region", ""),
+                                        "cliente": contexto.get("cliente", ""),
+                                        "equipo": contexto.get("equipo", ""),
+                                        "tipo_equipo": contexto.get("tipo_equipo", ""),
+                                        "sistema_afectado": contexto.get("sistema_afectado", ""),
+                                        "criticidad": contexto.get("criticidad", ""),
+                                        "estado": contexto.get("estado", ""),
+                                        "hallazgo_original": hallazgo_final,
+                                        "norma_detectada": nombre_norma_limpio(norma_final),
+                                        "informe_generado": informe_final,
+                                        "cantidad_imagenes": len(st.session_state.get("imagenes_actuales", [])),
+                                        "origen": "Asistente de Inspección INVAP",
+                                        "validado_por_usuario": True,
+                                        "usuario": "No identificado"
+                                    }
+
+                                    ruta = guardar_registro_inspeccion(creds, project_id, registro)
+                                    st.session_state["ruta_ultimo_archivo"] = ruta
+
+                                st.success(f"Informe archivado correctamente: {ruta}")
+
+                            except Exception as e:
+                                st.error(f"No se pudo archivar el informe: {e}")
+
+                if st.session_state.get("ruta_ultimo_archivo"):
+                    st.success(f"Último archivo guardado: {st.session_state['ruta_ultimo_archivo']}")
+
             else:
                 st.info("El informe técnico aparecerá aquí luego de procesar el hallazgo.")
 
