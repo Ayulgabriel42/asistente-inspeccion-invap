@@ -777,6 +777,255 @@ class InspeccionEngine:
 
         return None
 
+
+    # =========================================================
+    # CONSULTA DIRECTA SOBRE PDF / SOPORTE PARA PDF ESCANEADO
+    # =========================================================
+    def extraer_codigos_norma_de_pregunta(self, pregunta):
+        """
+        Detecta normas mencionadas explícitamente en consultas libres.
+        Ejemplos:
+        - API 4G
+        - API RP 4G
+        - API Spec 16D
+        - ASME B30.1
+        - IRAM 3914-1
+
+        Evita depender solo de la matriz normativa cuando el usuario ya indicó la norma.
+        """
+        if not pregunta:
+            return []
+
+        texto = self.normalizar_texto(pregunta)
+        codigos = []
+
+        patrones = [
+            r"\bapi\s*(?:rp|spec|recommended practice)?\s*[-:]?\s*([0-9]{1,3}[a-z]?(?:\.[0-9]+)?(?:-[a-z0-9]+)?)\b",
+            r"\basme\s*[-:]?\s*([a-z]?[0-9]{1,3}(?:\.[0-9]+)?)\b",
+            r"\biram\s*[-:]?\s*([0-9]{3,5}(?:-[0-9]+)?)\b",
+            r"\baws\s*[-:]?\s*([a-z][0-9](?:\.[0-9]+)?)\b",
+            r"\bastm\s*[-:]?\s*([a-z]?[0-9]{2,5}(?:/[a-z0-9]+)?(?:-[0-9]+)?)\b",
+            r"\biso\s*[-:]?\s*([0-9]{2,5}(?:-[0-9]+)?)\b",
+        ]
+
+        for patron in patrones:
+            for match in re.findall(patron, texto, flags=re.I):
+                codigo = str(match).upper().replace(" ", "")
+                if codigo and codigo not in codigos:
+                    codigos.append(codigo)
+
+        return codigos
+
+
+    def resolver_norma_mencionada_en_pregunta(self, pregunta, lista_normas):
+        """
+        Si el usuario menciona explícitamente una norma, la prioriza.
+        Ejemplo:
+        'Qué dice la tabla 3 de API 4G' -> API - 4G - 2020.pdf
+        """
+        if not pregunta or not lista_normas:
+            return None
+
+        codigos = self.extraer_codigos_norma_de_pregunta(pregunta)
+
+        for codigo in codigos:
+            encontrada = self.buscar_norma_por_codigo(lista_normas, codigo)
+            if encontrada:
+                return encontrada
+
+        # Alias especiales frecuentes
+        texto = self.normalizar_texto(pregunta)
+        texto_compacto = re.sub(r"[^a-z0-9]+", "", texto)
+
+        alias_api_4g = [
+            "api4g",
+            "apirp4g",
+            "apirecommendedpractice4g",
+        ]
+
+        if any(alias in texto_compacto for alias in alias_api_4g):
+            encontrada = self.buscar_norma_por_codigo(lista_normas, "4G")
+            if encontrada:
+                return encontrada
+
+        return None
+
+
+    def descargar_pdf_norma_desde_gcs(self, norma_path):
+        """
+        Descarga el PDF de la norma desde el bucket configurado.
+        """
+        storage_client = storage.Client(credentials=self.creds, project=self.project_id)
+        bucket = storage_client.bucket(self.bucket_name)
+        blob = bucket.blob(norma_path)
+        return blob.download_as_bytes()
+
+
+    def extraer_texto_pdf_bytes(self, pdf_bytes):
+        """
+        Intenta extraer texto de un PDF.
+        Si el PDF es escaneado, probablemente devuelva poco o nada.
+        """
+        try:
+            from pypdf import PdfReader
+
+            reader = PdfReader(io.BytesIO(pdf_bytes))
+            partes = []
+
+            for i, page in enumerate(reader.pages, start=1):
+                try:
+                    texto = page.extract_text() or ""
+                    texto = texto.strip()
+                    if texto:
+                        partes.append(f"\n\n--- Página {i} ---\n{texto}")
+                except Exception:
+                    continue
+
+            return "\n".join(partes).strip()
+
+        except Exception:
+            return ""
+
+
+    def recortar_contexto_pdf(self, texto, pregunta, limite=18000):
+        """
+        Recorta el texto extraído del PDF alrededor de términos relevantes
+        para no enviar documentos enormes cuando el PDF sí tiene texto.
+        """
+        if not texto:
+            return ""
+
+        if len(texto) <= limite:
+            return texto
+
+        pregunta_norm = self.normalizar_texto(pregunta)
+        texto_norm = self.normalizar_texto(texto)
+
+        claves = []
+
+        for patron in [
+            r"tabla\s+\d+",
+            r"table\s+\d+",
+            r"seccion\s+[0-9.]+",
+            r"section\s+[0-9.]+",
+            r"annex\s+[a-z]",
+            r"anexo\s+[a-z]",
+        ]:
+            claves.extend(re.findall(patron, pregunta_norm, flags=re.I))
+
+        claves.extend(self.extraer_codigos_norma_de_pregunta(pregunta))
+
+        # Términos típicos de tablas/criterios
+        claves.extend([
+            "inspection criteria",
+            "criterios de inspeccion",
+            "frequency",
+            "frecuencia",
+            "damage classification",
+            "clasificacion de daño",
+        ])
+
+        fragmentos = []
+        ventana = 3000
+
+        for clave in claves:
+            clave_norm = self.normalizar_texto(clave)
+            if not clave_norm:
+                continue
+
+            pos = texto_norm.find(clave_norm)
+            if pos >= 0:
+                ini = max(0, pos - ventana)
+                fin = min(len(texto), pos + ventana)
+                fragmentos.append(texto[ini:fin])
+
+        if fragmentos:
+            unido = "\n\n--- FRAGMENTO RELEVANTE ---\n\n".join(fragmentos)
+            return unido[:limite]
+
+        return texto[:limite]
+
+
+    def consultar_pdf_norma_directo(self, pregunta, norma_path, lista_imagenes=None):
+        """
+        Consulta directa sobre una norma específica.
+
+        Si el PDF no tiene texto extraíble o la consulta pide tabla/figura/anexo,
+        adjunta el PDF completo a Gemini para lectura visual del documento.
+        """
+        pdf_bytes = self.descargar_pdf_norma_desde_gcs(norma_path)
+        texto_extraido = self.extraer_texto_pdf_bytes(pdf_bytes)
+
+        pregunta_norm = self.normalizar_texto(pregunta)
+
+        consulta_visual = any(
+            palabra in pregunta_norm
+            for palabra in [
+                "tabla",
+                "table",
+                "figura",
+                "figure",
+                "anexo",
+                "annex",
+                "grafico",
+                "gráfico",
+            ]
+        )
+
+        pdf_escaneado = len(texto_extraido.strip()) < 1200
+
+        contexto = ""
+        if texto_extraido and not pdf_escaneado:
+            contexto = self.recortar_contexto_pdf(texto_extraido, pregunta)
+
+        prompt = (
+            "SISTEMA DE CONSULTA NORMATIVA INVAP INGENIERÍA\n"
+            "=================================================\n"
+            f"Norma seleccionada desde la base documental: {norma_path}\n\n"
+            "Tarea:\n"
+            "Responder la pregunta del usuario usando exclusivamente la norma seleccionada.\n\n"
+            "Instrucciones obligatorias:\n"
+            "1. Si el PDF adjunto está escaneado o tiene baja calidad, leelo visualmente como OCR.\n"
+            "2. Si el usuario pregunta por una tabla, buscá esa tabla por número y título.\n"
+            "3. No inventes artículos, párrafos, tablas, valores ni requisitos que no puedas leer.\n"
+            "4. Si algo no es legible, indicá claramente que la lectura es parcial.\n"
+            "5. Respondé en español técnico, claro y breve.\n"
+            "6. Indicá norma, tabla/sección y página si la podés identificar.\n\n"
+            f"Pregunta del usuario:\n{pregunta}\n\n"
+        )
+
+        if contexto:
+            prompt += f"Texto extraído automáticamente del PDF:\n{contexto}\n\n"
+        else:
+            prompt += (
+                "No se recuperó texto suficiente del PDF mediante extracción tradicional. "
+                "Probablemente sea un PDF escaneado. Usar lectura visual del PDF adjunto.\n\n"
+            )
+
+        contenidos = [prompt]
+
+        if pdf_escaneado or consulta_visual:
+            contenidos.append(
+                types.Part.from_bytes(
+                    data=pdf_bytes,
+                    mime_type="application/pdf"
+                )
+            )
+
+        if lista_imagenes:
+            for img_data, img_mime in lista_imagenes:
+                contenidos.append(
+                    types.Part.from_bytes(data=img_data, mime_type=img_mime)
+                )
+
+        response = self.client.models.generate_content(
+            model=self.model_id,
+            contents=contenidos
+        )
+
+        return response.text
+
+
     # =========================================================
     # CLASIFICADOR DE NORMA HÍBRIDO
     # =========================================================
@@ -1180,6 +1429,28 @@ class InspeccionEngine:
 
         if not lista_normas:
             return "No hay normas disponibles cargadas en el sistema."
+
+        # -----------------------------------------------------
+        # PRIORIDAD 1:
+        # Si el usuario menciona una norma explícita, consultar
+        # directamente ese PDF. Esto corrige casos como:
+        # "¿Qué dice la Tabla 3 de API 4G?"
+        # -----------------------------------------------------
+        norma_directa = self.resolver_norma_mencionada_en_pregunta(
+            pregunta,
+            lista_normas
+        )
+
+        if norma_directa:
+            try:
+                return self.consultar_pdf_norma_directo(
+                    pregunta=pregunta,
+                    norma_path=norma_directa,
+                    lista_imagenes=lista_imagenes
+                )
+            except Exception as e:
+                # Si falla la lectura directa, continúa con el flujo anterior.
+                print(f"Fallback consulta normativa directa: {e}")
 
         pregunta_lower = self.normalizar_texto(pregunta)
 
