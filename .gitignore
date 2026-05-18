@@ -207,3 +207,6 @@ marimo/_lsp/
 __marimo__/
 .streamlit/
 google-credentials.json
+
+# Backups y scripts temporales de desarrollo
+_dev_backups_patches/

@@ -1119,6 +1119,9 @@ def init_session_state():
 
         # QA
         "qa_resultado": "",
+
+        # Sincronización manual
+        "sync_msg": "",
     }
 
     for k, v in defaults.items():
@@ -2371,8 +2374,19 @@ with st.sidebar:
 
     st.write("---")
 
-    if st.button("🔄 Actualizar datos", width="stretch"):
+    if st.button("🔄 Sincronizar normas y datos", width="stretch"):
+        try:
+            st.session_state["lista_normas"] = cargar_lista_normas(creds, project_id)
+            st.session_state["sync_msg"] = (
+                f"Sincronización completa. Normas disponibles: "
+                f"{len(st.session_state['lista_normas'])}"
+            )
+        except Exception as e:
+            st.session_state["sync_msg"] = f"No se pudo sincronizar: {e}"
         st.rerun()
+
+    if st.session_state.get("sync_msg"):
+        st.success(st.session_state["sync_msg"])
 
 
 # =========================================================
