@@ -9,6 +9,7 @@ import textwrap
 from zoneinfo import ZoneInfo
 
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 
 from google.cloud import storage
@@ -24,6 +25,29 @@ BUCKET_NAME = "invap-asistente-normas"
 REGISTROS_PREFIX = "registros_inspecciones"
 APP_TZ = ZoneInfo("America/Argentina/Buenos_Aires")
 
+LOGO_SIDEBAR_CANDIDATES = [
+    "assets/Logo 1.jpg",
+    "assets/logo_1.jpg",
+    "assets/logo_invap_sidebar.jpg",
+    "assets/logo_invap_sidebar.png",
+    "assets/logo_invap_ingenieria.png",
+]
+
+LOGO_HEADER_CANDIDATES = [
+    "assets/Logo 2.jpg",
+    "assets/logo_2.jpg",
+    "assets/logo_invap_header.jpg",
+    "assets/logo_invap_header.png",
+    "assets/logo_invap_ingenieria.png",
+]
+
+FOOTER_LOGO_CANDIDATES = [
+    "assets/Logo 2.jpg",
+    "assets/logo_footer_invap.png",
+    "assets/logo_invap_footer.png",
+    "assets/logo_invap_ingenieria.png",
+]
+
 
 def ahora_argentina():
     """
@@ -31,6 +55,99 @@ def ahora_argentina():
     Evita que Streamlit/servidor guarde horarios UTC o de otra zona.
     """
     return datetime.datetime.now(APP_TZ).replace(tzinfo=None)
+
+
+
+def buscar_logo(candidatos):
+    for path in candidatos:
+        if os.path.exists(path):
+            return path
+    return None
+
+
+def render_logo_invap_sidebar(width=245):
+    logo = buscar_logo(LOGO_SIDEBAR_CANDIDATES)
+    if logo:
+        st.image(logo, width=width)
+    else:
+        st.markdown(
+            """
+            <div style="
+                background:#0C5A43;
+                color:white;
+                border-radius:16px;
+                padding:16px;
+                font-weight:900;
+                text-align:center;
+                border:1px solid rgba(255,255,255,0.18);
+            ">
+                INVAP<br>INGENIERÍA S.A.
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+
+def render_logo_invap_header(width=190):
+    logo = buscar_logo(LOGO_HEADER_CANDIDATES)
+    if logo:
+        st.image(logo, width=width)
+    else:
+        st.markdown(
+            """
+            <div style="
+                background:#FFFFFF;
+                color:#0C5A43;
+                border-radius:16px;
+                padding:16px;
+                font-weight:900;
+                text-align:center;
+                border:1px solid #CFE3DA;
+            ">
+                INVAP<br>INGENIERÍA S.A.
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+
+
+# =========================================================
+# HELPERS FOOTER INVAP
+# =========================================================
+def _file_to_data_uri(path):
+    if not path or not os.path.exists(path):
+        return None
+    ext = os.path.splitext(path)[1].lower()
+    mime = "image/png"
+    if ext in [".jpg", ".jpeg"]:
+        mime = "image/jpeg"
+    elif ext == ".svg":
+        mime = "image/svg+xml"
+
+    with open(path, "rb") as f:
+        encoded = base64.b64encode(f.read()).decode("utf-8")
+    return f"data:{mime};base64,{encoded}"
+
+
+def render_footer_invap():
+    footer_logo = buscar_logo(FOOTER_LOGO_CANDIDATES)
+    logo_uri = _file_to_data_uri(footer_logo)
+
+    if logo_uri:
+        html = f"""
+        <div class="invap-fixed-footer">
+            <img src="{logo_uri}" alt="INVAP Ingeniería S.A." />
+        </div>
+        """
+    else:
+        html = """
+        <div class="invap-fixed-footer invap-fixed-footer-text">
+            INVAP INGENIERÍA S.A.
+        </div>
+        """
+
+    st.markdown(html, unsafe_allow_html=True)
 
 
 CLIENTES_COMODORO = [
@@ -110,93 +227,153 @@ st.set_page_config(
 st.markdown("""
 <style>
 :root {
-    --invap-green: #007A3D;
-    --invap-green-dark: #005E31;
-    --invap-green-soft: #E8F4EE;
-    --text-main: #0F172A;
-    --text-muted: #64748B;
-    --border-soft: #D9E2E8;
-    --bg-app: #F6F8FA;
+    --invap-green-dark: #004B35;
+    --invap-green-main: #007A3D;
+    --invap-green-mid: #0F7A59;
+    --invap-green-light: #EAF6F0;
+    --invap-green-soft: #DDF2E8;
+    --invap-white: #FFFFFF;
+    --text-main: #0F241C;
+    --text-muted: #60756D;
+    --border-soft: #CFE3DA;
+    --bg-app: #F4F8F6;
     --bg-card: #FFFFFF;
-    --danger-soft: #FEE2E2;
-    --danger-text: #7F1D1D;
-    --warning-soft: #FEF3C7;
-    --warning-text: #78350F;
 }
 
 .stApp {
-    background-color: var(--bg-app) !important;
+    background: var(--bg-app) !important;
 }
 
 .block-container {
     padding-top: 1.4rem !important;
-    padding-bottom: 2rem !important;
-    max-width: 1180px !important;
+    padding-bottom: 2.2rem !important;
+    max-width: 1250px !important;
 }
 
+/* Tipografía */
 html, body, [class*="css"] {
     font-size: 16px !important;
     color: var(--text-main) !important;
 }
 
-h1 {
-    font-size: 2.1rem !important;
-    font-weight: 800 !important;
+h1, h2, h3 {
     color: var(--text-main) !important;
-    letter-spacing: -0.02em !important;
-    margin-bottom: 0.8rem !important;
+}
+
+h1 {
+    font-size: 2.15rem !important;
+    font-weight: 900 !important;
+    letter-spacing: -0.03em !important;
 }
 
 h2 {
     font-size: 1.55rem !important;
-    font-weight: 750 !important;
-    color: var(--text-main) !important;
+    font-weight: 850 !important;
 }
 
 h3 {
-    font-size: 1.25rem !important;
-    font-weight: 700 !important;
-    color: var(--text-main) !important;
+    font-size: 1.20rem !important;
+    font-weight: 800 !important;
 }
 
 .big-section-title {
     font-size: 2rem !important;
-    font-weight: 800 !important;
+    font-weight: 900 !important;
     color: var(--text-main) !important;
-    margin-bottom: 1rem !important;
+    margin-bottom: 0.6rem !important;
 }
 
 .small-muted,
 [data-testid="stCaptionContainer"],
 .stCaptionContainer {
     color: var(--text-muted) !important;
-    font-size: 0.95rem !important;
+    font-size: 0.96rem !important;
 }
 
+/* Sidebar INVAP */
 section[data-testid="stSidebar"] {
-    background: linear-gradient(180deg, #F0F8F4 0%, #E7F2EC 100%) !important;
-    border-right: 1px solid #C9DAD1 !important;
+    background: linear-gradient(180deg, #003D2B 0%, #004B35 48%, #006B49 100%) !important;
+    border-right: 1px solid rgba(255,255,255,0.10) !important;
 }
 
-section[data-testid="stSidebar"] h1,
-section[data-testid="stSidebar"] h2,
-section[data-testid="stSidebar"] h3 {
-    color: var(--text-main) !important;
+section[data-testid="stSidebar"] * {
+    color: #FFFFFF !important;
+}
+
+section[data-testid="stSidebar"] [data-testid="stImage"] {
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.14);
+    border-radius: 18px;
+    padding: 12px;
+    margin-bottom: 12px;
+    box-shadow: 0 8px 18px rgba(0,0,0,0.12);
 }
 
 section[data-testid="stSidebar"] [role="radiogroup"] label {
-    font-size: 0.98rem !important;
-    font-weight: 600 !important;
+    font-size: 1.04rem !important;
+    font-weight: 750 !important;
+    padding: 0.42rem 0 !important;
 }
 
+section[data-testid="stSidebar"] hr {
+    border-color: rgba(255,255,255,0.18) !important;
+}
+
+.sidebar-brand {
+    background: rgba(255,255,255,0.10);
+    border: 1px solid rgba(255,255,255,0.16);
+    border-radius: 18px;
+    padding: 16px 16px;
+    margin: 12px 0 18px 0;
+    box-shadow: 0 8px 18px rgba(0,0,0,0.10);
+}
+
+.sidebar-brand-title {
+    font-size: 1.12rem;
+    font-weight: 900;
+    color: #FFFFFF;
+    margin-bottom: 5px;
+}
+
+.sidebar-brand-sub {
+    font-size: 0.92rem;
+    color: #E8F7F0;
+    line-height: 1.38;
+}
+
+/* Cabecera institucional */
+.invap-header-card {
+    background: linear-gradient(135deg, #007A3D 0%, #004B35 74%, #003D2B 100%);
+    border-radius: 24px;
+    padding: 26px 30px;
+    border: 1px solid rgba(207, 227, 218, 0.95);
+    box-shadow: 0 10px 26px rgba(0, 75, 53, 0.18);
+    margin-bottom: 1.3rem;
+}
+
+.invap-header-title {
+    font-size: 2.08rem;
+    font-weight: 950;
+    color: #FFFFFF;
+    letter-spacing: -0.03em;
+    margin-bottom: 7px;
+}
+
+.invap-header-subtitle {
+    font-size: 1.03rem;
+    color: #EAF6F0;
+    line-height: 1.45;
+}
+
+/* Inputs */
 label,
 .stTextInput label,
 .stTextArea label,
 .stSelectbox label,
 .stFileUploader label {
-    font-size: 0.98rem !important;
-    font-weight: 700 !important;
-    color: #1E293B !important;
+    font-size: 1rem !important;
+    font-weight: 800 !important;
+    color: var(--text-main) !important;
 }
 
 .stTextInput input,
@@ -205,8 +382,8 @@ label,
 .stDateInput input,
 .stNumberInput input {
     font-size: 1rem !important;
-    border-radius: 10px !important;
-    border: 1.5px solid #CBD5E1 !important;
+    border-radius: 14px !important;
+    border: 1.5px solid var(--border-soft) !important;
     background-color: #FFFFFF !important;
     color: var(--text-main) !important;
     box-shadow: none !important;
@@ -216,150 +393,143 @@ label,
 .stTextArea textarea:focus,
 .stDateInput input:focus,
 .stNumberInput input:focus {
-    border: 1.5px solid var(--invap-green) !important;
-    box-shadow: 0 0 0 3px rgba(0, 122, 61, 0.12) !important;
+    border: 1.5px solid var(--invap-green-main) !important;
+    box-shadow: 0 0 0 3px rgba(0, 122, 61, 0.14) !important;
 }
 
 .stTextInput input,
 .stDateInput input,
 .stNumberInput input {
-    min-height: 46px !important;
-    padding-left: 14px !important;
+    min-height: 52px !important;
+    padding-left: 15px !important;
 }
 
 .stTextArea textarea {
-    min-height: 150px !important;
-    padding: 14px !important;
+    min-height: 170px !important;
+    padding: 15px !important;
     line-height: 1.45 !important;
 }
 
 .stSelectbox div[data-baseweb="select"] > div {
-    min-height: 48px !important;
+    min-height: 52px !important;
     display: flex !important;
     align-items: center !important;
 }
 
+/* Botones grandes */
 .stButton > button {
     width: 100%;
-    min-height: 48px !important;
-    font-size: 0.98rem !important;
-    font-weight: 700 !important;
-    border-radius: 10px !important;
-    border: 1px solid var(--invap-green) !important;
-    background: var(--invap-green) !important;
+    min-height: 60px !important;
+    font-size: 1.06rem !important;
+    font-weight: 900 !important;
+    border-radius: 16px !important;
+    border: 1px solid #004B35 !important;
+    background: linear-gradient(135deg, #007A3D 0%, #004B35 100%) !important;
     color: #FFFFFF !important;
-    box-shadow: 0 2px 6px rgba(15, 23, 42, 0.14) !important;
-    transition: all 0.15s ease-in-out !important;
+    box-shadow: 0 6px 15px rgba(0, 75, 53, 0.22) !important;
+    transition: all 0.18s ease-in-out !important;
+    padding: 0.82rem 1rem !important;
 }
 
 .stButton > button:hover {
-    background: var(--invap-green-dark) !important;
-    border-color: var(--invap-green-dark) !important;
+    background: linear-gradient(135deg, #008F4B 0%, #004B35 100%) !important;
+    border-color: #003D2B !important;
     color: #FFFFFF !important;
     transform: translateY(-1px);
+    box-shadow: 0 9px 22px rgba(0, 75, 53, 0.28) !important;
 }
 
 .stButton > button:active {
     transform: translateY(0px);
 }
 
+/* Botones HTML de descarga */
 a button {
-    min-height: 48px !important;
-    font-size: 0.98rem !important;
-    font-weight: 700 !important;
-    border-radius: 10px !important;
-    box-shadow: 0 2px 6px rgba(15, 23, 42, 0.14) !important;
+    width: 100%;
+    min-height: 58px !important;
+    background: linear-gradient(135deg, #007A3D 0%, #004B35 100%) !important;
+    color: #FFFFFF !important;
+    border: none !important;
+    border-radius: 16px !important;
+    cursor: pointer !important;
+    font-size: 15px !important;
+    font-weight: 900 !important;
+    box-shadow: 0 6px 15px rgba(0, 75, 53, 0.22) !important;
+}
+
+/* Cards */
+.camera-off-box,
+.note-box,
+.attention-card,
+.dashboard-box,
+.form-box,
+[data-testid="metric-container"] {
+    border-radius: 18px !important;
+    background: var(--bg-card) !important;
+    border: 1px solid var(--border-soft) !important;
+    box-shadow: 0 4px 12px rgba(15, 36, 28, 0.07) !important;
 }
 
 .camera-off-box {
-    padding: 0.9rem 1rem !important;
-    border-radius: 10px !important;
-    background: var(--invap-green-soft) !important;
-    border: 1px solid rgba(0, 122, 61, 0.28) !important;
-    color: #064E2B !important;
-    font-size: 0.98rem !important;
-    font-weight: 650 !important;
+    padding: 1rem !important;
+    background: var(--invap-green-light) !important;
+    color: var(--text-main) !important;
+    font-weight: 750 !important;
     line-height: 1.45 !important;
 }
 
-.note-box {
-    padding: 0.9rem !important;
-    border-radius: 10px !important;
-    background: #FFFFFF !important;
-    border: 1px solid var(--border-soft) !important;
-    margin-bottom: 0.7rem !important;
-    box-shadow: 0 1px 4px rgba(15, 23, 42, 0.06) !important;
-}
-
-.attention-card {
-    padding: 1rem !important;
-    border-radius: 12px !important;
-    background: #FFFFFF !important;
-    border: 1px solid var(--border-soft) !important;
-    box-shadow: 0 1px 5px rgba(15,23,42,0.06) !important;
-    margin-bottom: 0.7rem !important;
-}
-
-.attention-critical {
-    border-left: 6px solid #DC2626 !important;
-}
-
-.attention-warning {
-    border-left: 6px solid #F59E0B !important;
-}
-
-.attention-ok {
-    border-left: 6px solid var(--invap-green) !important;
-}
-
+.note-box,
+.attention-card,
 .dashboard-box,
 .form-box {
     padding: 1rem !important;
-    border-radius: 12px !important;
-    background: #FFFFFF !important;
-    border: 1px solid var(--border-soft) !important;
-    box-shadow: 0 1px 5px rgba(15,23,42,0.06) !important;
-    margin-bottom: 1rem !important;
+    margin-bottom: 0.85rem !important;
 }
 
-.step-title {
-    font-size: 1.1rem !important;
-    font-weight: 800 !important;
-    color: #0F172A !important;
-    margin-bottom: 0.4rem !important;
+.attention-critical {
+    border-left: 7px solid #C62828 !important;
+}
+
+.attention-warning {
+    border-left: 7px solid #D79A16 !important;
+}
+
+.attention-ok {
+    border-left: 7px solid var(--invap-green-main) !important;
 }
 
 [data-testid="stFileUploader"] {
     background-color: #FFFFFF !important;
-    border: 1.5px dashed #94A3B8 !important;
-    border-radius: 10px !important;
-    padding: 0.9rem !important;
+    border: 1.7px dashed #A8CDBD !important;
+    border-radius: 16px !important;
+    padding: 1rem !important;
 }
 
 [data-testid="stFileUploader"]:hover {
-    border-color: var(--invap-green) !important;
+    border-color: var(--invap-green-main) !important;
 }
 
 [data-testid="stCameraInput"],
 [data-testid="stAudioInput"] {
     background-color: #FFFFFF !important;
     border: 1px solid var(--border-soft) !important;
-    border-radius: 10px !important;
-    padding: 0.9rem !important;
+    border-radius: 16px !important;
+    padding: 1rem !important;
 }
 
 .stAlert {
-    font-size: 0.96rem !important;
-    border-radius: 10px !important;
+    font-size: 0.98rem !important;
+    border-radius: 16px !important;
     border: 1px solid var(--border-soft) !important;
 }
 
 [data-testid="metric-container"] {
-    background-color: #FFFFFF !important;
-    border: 1px solid var(--border-soft) !important;
     padding: 1rem !important;
-    border-radius: 12px !important;
-    box-shadow: 0 1px 5px rgba(15,23,42,0.06) !important;
+}
+
+[data-testid="stDataFrame"] {
+    border-radius: 16px !important;
+    overflow: hidden !important;
 }
 
 p, div, span {
@@ -372,20 +542,16 @@ p, div, span {
         padding-right: 1rem !important;
     }
 
-    h1 {
-        font-size: 1.8rem !important;
+    .big-section-title {
+        font-size: 1.65rem !important;
     }
 
-    .big-section-title {
-        font-size: 1.7rem !important;
+    .invap-header-title {
+        font-size: 1.55rem;
     }
 
     .stButton > button {
-        min-height: 52px !important;
-    }
-
-    .stTextArea textarea {
-        min-height: 140px !important;
+        min-height: 62px !important;
     }
 }
 </style>
@@ -827,8 +993,8 @@ def generar_descarga_txt(nombre_base: str, contenido: str, label: str):
     timestamp = ahora_argentina().strftime("%Y%m%d_%H%M")
     href = f"""
     <a href="data:file/txt;base64,{b64}" download="{nombre_base}_{timestamp}.txt">
-        <button style="width: 100%; height: 46px; background-color: #1f6feb; color: white;
-        border: none; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: bold;">
+        <button style="width: 100%; height: 58px; background: linear-gradient(135deg, #007A3D 0%, #004B35 100%); color: white;
+        border: none; border-radius: 16px; cursor: pointer; font-size: 15px; font-weight: 900;">
             {label}
         </button>
     </a>
@@ -845,8 +1011,8 @@ def generar_descarga_markdown(nombre_base: str, contenido_md: str, label: str):
     timestamp = ahora_argentina().strftime("%Y%m%d_%H%M")
     href = f"""
     <a href="data:text/markdown;base64,{b64}" download="{nombre_base}_{timestamp}.md">
-        <button style="width: 100%; height: 46px; background-color: #198754; color: white;
-        border: none; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: bold;">
+        <button style="width: 100%; height: 58px; background: linear-gradient(135deg, #007A3D 0%, #004B35 100%); color: white;
+        border: none; border-radius: 16px; cursor: pointer; font-size: 15px; font-weight: 900;">
             {label}
         </button>
     </a>
@@ -864,8 +1030,8 @@ def generar_descarga_pdf(nombre_base: str, contenido_md: str, label: str):
     timestamp = ahora_argentina().strftime("%Y%m%d_%H%M")
     href = f"""
     <a href="data:application/pdf;base64,{b64}" download="{nombre_base}_{timestamp}.pdf">
-        <button style="width: 100%; height: 46px; background-color: #7C3AED; color: white;
-        border: none; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: bold;">
+        <button style="width: 100%; height: 58px; background: linear-gradient(135deg, #007A3D 0%, #004B35 100%); color: white;
+        border: none; border-radius: 16px; cursor: pointer; font-size: 15px; font-weight: 900;">
             {label}
         </button>
     </a>
@@ -1889,6 +2055,278 @@ def render_qa():
         st.info("El resultado de la auditoría aparecerá aquí.")
 
 
+
+# =========================================================
+# AJUSTE FINO SIDEBAR INVAP
+# =========================================================
+st.markdown("""
+<style>
+/* Logo limpio, sin tarjeta ni borde redondeado */
+section[data-testid="stSidebar"] [data-testid="stImage"] {
+    background: transparent !important;
+    border: none !important;
+    border-radius: 0 !important;
+    padding: 0 !important;
+    margin: 0 0 26px 0 !important;
+    box-shadow: none !important;
+}
+
+section[data-testid="stSidebar"] [data-testid="stImage"] img {
+    border-radius: 0 !important;
+    box-shadow: none !important;
+}
+
+/* Separadores más sutiles */
+section[data-testid="stSidebar"] hr {
+    border: none !important;
+    border-top: 1px solid rgba(255,255,255,0.18) !important;
+    margin: 20px 0 !important;
+}
+
+/* Contenedor del listado */
+section[data-testid="stSidebar"] [role="radiogroup"] {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 10px !important;
+}
+
+/* Cada opción del menú como tarjeta/botón */
+section[data-testid="stSidebar"] [role="radiogroup"] label {
+    background: rgba(255,255,255,0.085) !important;
+    border: 1px solid rgba(255,255,255,0.18) !important;
+    border-radius: 16px !important;
+    padding: 13px 14px !important;
+    margin: 0 !important;
+    min-height: 50px !important;
+    display: flex !important;
+    align-items: center !important;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.08) !important;
+    transition: all 0.16s ease-in-out !important;
+}
+
+/* Hover de opciones */
+section[data-testid="stSidebar"] [role="radiogroup"] label:hover {
+    background: rgba(255,255,255,0.16) !important;
+    border-color: rgba(255,255,255,0.32) !important;
+    transform: translateY(-1px);
+}
+
+/* Texto del menú */
+section[data-testid="stSidebar"] [role="radiogroup"] label p,
+section[data-testid="stSidebar"] [role="radiogroup"] label span,
+section[data-testid="stSidebar"] [role="radiogroup"] label div {
+    font-size: 1.02rem !important;
+    font-weight: 780 !important;
+    color: #FFFFFF !important;
+}
+
+/* Radio button más integrado visualmente */
+section[data-testid="stSidebar"] [role="radiogroup"] label [data-testid="stMarkdownContainer"] {
+    margin-left: 4px !important;
+}
+
+/* Botón actualizar como acción inferior */
+section[data-testid="stSidebar"] .stButton > button {
+    min-height: 58px !important;
+    border-radius: 18px !important;
+    background: linear-gradient(135deg, #007A3D 0%, #004B35 100%) !important;
+    border: 1px solid rgba(255,255,255,0.18) !important;
+    box-shadow: 0 8px 18px rgba(0,0,0,0.16) !important;
+}
+
+/* Quita restos del recuadro anterior si quedó definido */
+.sidebar-brand {
+    display: none !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+
+
+# =========================================================
+# AJUSTES FINOS UI INVAP
+# =========================================================
+st.markdown("""
+<style>
+/* =========================
+   CORRECCIÓN HEADER SUPERIOR
+   ========================= */
+[data-testid="stAppViewContainer"] .main .block-container {
+    padding-top: 2.85rem !important;
+}
+
+.invap-header-card {
+    margin-top: 0.75rem !important;
+}
+
+/* =========================
+   SIDEBAR - LOGO MEJORADO
+   ========================= */
+section[data-testid="stSidebar"] [data-testid="stImage"] {
+    background: rgba(221,242,232,0.06) !important;
+    border: 1.6px solid rgba(221,242,232,0.30) !important;
+    border-radius: 22px !important;
+    padding: 12px !important;
+    margin: 4px 0 22px 0 !important;
+    box-shadow: none !important;
+}
+
+section[data-testid="stSidebar"] [data-testid="stImage"] img {
+    border-radius: 16px !important;
+    display: block !important;
+}
+
+/* Sidebar un poco más prolija */
+section[data-testid="stSidebar"] {
+    padding-top: 0.2rem !important;
+}
+
+/* =========================
+   FOOTER FIJO INFERIOR DERECHO
+   ========================= */
+.invap-fixed-footer {
+    position: fixed;
+    right: 22px;
+    bottom: 10px;
+    z-index: 999999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+    opacity: 0.98;
+}
+
+.invap-fixed-footer img {
+    max-width: 190px;
+    height: auto;
+    display: block;
+    filter: drop-shadow(0 3px 8px rgba(0,0,0,0.18));
+}
+
+.invap-fixed-footer-text {
+    color: #FFFFFF;
+    background: rgba(0, 75, 53, 0.88);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 14px;
+    padding: 8px 14px;
+    font-size: 0.88rem;
+    font-weight: 900;
+    letter-spacing: 0.02em;
+    box-shadow: 0 6px 14px rgba(0,0,0,0.18);
+}
+
+/* Responsive del footer */
+@media (max-width: 900px) {
+    .invap-fixed-footer {
+        right: 12px;
+        bottom: 8px;
+    }
+    .invap-fixed-footer img {
+        max-width: 135px;
+    }
+}
+
+/* Un poco más de aire debajo para que nada quede muy justo */
+.block-container {
+    padding-bottom: 3.5rem !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+
+
+# =========================================================
+# CONTROLADOR VISUAL FOOTER / SIDEBAR
+# =========================================================
+def render_footer_visibility_controller():
+    components.html(
+        """
+        <script>
+        (function() {
+            function isVisible(el) {
+                if (!el) return false;
+                const rect = el.getBoundingClientRect();
+                const style = window.parent.getComputedStyle(el);
+                return rect.width > 0 && rect.height > 0 &&
+                       style.display !== "none" &&
+                       style.visibility !== "hidden" &&
+                       style.opacity !== "0";
+            }
+
+            function updateFooterVisibility() {
+                try {
+                    const doc = window.parent.document;
+                    const footer = doc.querySelector(".invap-fixed-footer");
+                    if (!footer) return;
+
+                    const sidebar = doc.querySelector('section[data-testid="stSidebar"]');
+
+                    const buttons = Array.from(doc.querySelectorAll("button, [role='button']"));
+                    const openSidebarButton = buttons.find(btn => {
+                        const aria = (btn.getAttribute("aria-label") || "").toLowerCase();
+                        const title = (btn.getAttribute("title") || "").toLowerCase();
+                        const txt = (btn.textContent || "").trim();
+
+                        return (
+                            aria.includes("open sidebar") ||
+                            aria.includes("expand sidebar") ||
+                            aria.includes("show sidebar") ||
+                            title.includes("open sidebar") ||
+                            title.includes("expand sidebar") ||
+                            txt === "»" ||
+                            txt === ">>" ||
+                            txt.includes("»")
+                        );
+                    });
+
+                    let sidebarCollapsed = false;
+
+                    if (!sidebar) {
+                        sidebarCollapsed = true;
+                    } else {
+                        const rect = sidebar.getBoundingClientRect();
+                        const style = window.parent.getComputedStyle(sidebar);
+
+                        sidebarCollapsed =
+                            rect.width < 80 ||
+                            style.display === "none" ||
+                            style.visibility === "hidden" ||
+                            sidebar.getAttribute("aria-expanded") === "false";
+                    }
+
+                    const hasOpenButtonVisible = openSidebarButton && isVisible(openSidebarButton);
+
+                    if (sidebarCollapsed || hasOpenButtonVisible) {
+                        footer.style.setProperty("display", "flex", "important");
+                    } else {
+                        footer.style.setProperty("display", "none", "important");
+                    }
+                } catch (e) {
+                    console.log("Footer/sidebar visibility controller:", e);
+                }
+            }
+
+            updateFooterVisibility();
+
+            const doc = window.parent.document;
+            const observer = new MutationObserver(updateFooterVisibility);
+            observer.observe(doc.body, {
+                childList: true,
+                subtree: true,
+                attributes: true,
+                attributeFilter: ["style", "class", "aria-expanded", "aria-label", "title"]
+            });
+
+            setInterval(updateFooterVisibility, 600);
+        })();
+        </script>
+        """,
+        height=0,
+        width=0,
+    )
+
+
+
 # =========================================================
 # INICIALIZACIÓN
 # =========================================================
@@ -1915,9 +2353,8 @@ if not st.session_state["lista_normas"]:
 # SIDEBAR
 # =========================================================
 with st.sidebar:
-    st.markdown("## 🔎 Asistente de Inspección")
-    st.markdown("### INVAP Ingeniería")
-    st.caption("Hallazgos, normativa, anotaciones, archivo documental y tablero operativo.")
+    render_logo_invap_sidebar(width=255)
+
     st.write("---")
 
     current_menu = st.session_state.get("menu_principal", "Dashboard operativo")
@@ -1933,6 +2370,7 @@ with st.sidebar:
     st.session_state["menu_principal"] = menu
 
     st.write("---")
+
     if st.button("🔄 Actualizar datos", width="stretch"):
         st.rerun()
 
@@ -1940,17 +2378,16 @@ with st.sidebar:
 # =========================================================
 # CABECERA
 # =========================================================
-col_logo, col_title = st.columns([1, 6])
-
-with col_logo:
-    st.image(
-        "https://www.invap.com.ar/wp-content/uploads/2022/04/Logo-INVAP-Blanco.png",
-        width=110
-    )
-
-with col_title:
-    st.title("Sistema Inteligente de Gestión de Integridad")
-    st.caption("Asistente de Inspección | Hallazgos técnicos, consulta normativa, trazabilidad y QA documental")
+st.markdown("""
+<div class="invap-header-card">
+    <div class="invap-header-title">
+        Sistema Inteligente de Gestión de Integridad
+    </div>
+    <div class="invap-header-subtitle">
+        Asistente de Inspección | Hallazgos técnicos, consulta normativa, trazabilidad documental y QA de informes
+    </div>
+</div>
+""", unsafe_allow_html=True)
 
 
 # =========================================================
@@ -1974,8 +2411,116 @@ elif st.session_state["menu_principal"] == "QA / Auditoría":
     render_qa()
 
 
+
+# =========================================================
+# AJUSTE FOOTER LOGO INVAP CORRECTO
+# =========================================================
+st.markdown("""
+<style>
+/* Footer inferior derecho con logo verde sobre fondo blanco */
+.invap-fixed-footer {
+    position: fixed !important;
+    right: 22px !important;
+    bottom: 14px !important;
+    z-index: 999999 !important;
+    pointer-events: none !important;
+
+    background: #FFFFFF !important;
+    border: 1px solid rgba(207, 227, 218, 0.95) !important;
+    border-radius: 12px !important;
+    padding: 8px 12px !important;
+
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+
+    box-shadow: 0 6px 18px rgba(0, 75, 53, 0.14) !important;
+    opacity: 0.98 !important;
+}
+
+.invap-fixed-footer img {
+    max-width: 180px !important;
+    height: auto !important;
+    display: block !important;
+    filter: none !important;
+    border-radius: 0 !important;
+}
+
+.invap-fixed-footer-text {
+    color: #0C5A43 !important;
+    background: #FFFFFF !important;
+    font-size: 0.88rem !important;
+    font-weight: 900 !important;
+    letter-spacing: 0.02em !important;
+}
+
+/* Evita que el contenido tape el footer */
+.block-container {
+    padding-bottom: 4rem !important;
+}
+
+@media (max-width: 900px) {
+    .invap-fixed-footer {
+        right: 12px !important;
+        bottom: 10px !important;
+        padding: 6px 9px !important;
+    }
+
+    .invap-fixed-footer img {
+        max-width: 135px !important;
+    }
+}
+</style>
+""", unsafe_allow_html=True)
+
+
+
+# =========================================================
+# FOOTER INVAP CONTROLADO POR JS
+# =========================================================
+st.markdown("""
+<style>
+.invap-fixed-footer {
+    display: none !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+
 # =========================================================
 # PIE
 # =========================================================
+render_footer_invap()
+render_footer_visibility_controller()
+
+# =========================================================
+# FOOTER SOLO CON SIDEBAR OCULTA
+# =========================================================
+st.markdown("""
+<style>
+/* 
+   El logo inferior derecho queda oculto cuando la sidebar está visible.
+   Se muestra únicamente cuando Streamlit deja visible el control de sidebar colapsada.
+*/
+.invap-fixed-footer {
+    display: none !important;
+}
+
+/* Sidebar colapsada: Streamlit muestra el control para volver a abrirla */
+body:has([data-testid="stSidebarCollapsedControl"]) .invap-fixed-footer,
+body:has(button[title="Open sidebar"]) .invap-fixed-footer,
+body:has(button[aria-label="Open sidebar"]) .invap-fixed-footer,
+body:has(button[aria-label="Expand sidebar"]) .invap-fixed-footer {
+    display: flex !important;
+}
+
+/* Compatibilidad extra por si cambia el nombre del control */
+body:has([data-testid*="Collapsed"]) .invap-fixed-footer,
+body:has([aria-label*="sidebar" i]) .invap-fixed-footer {
+    display: flex !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
 st.divider()
 st.caption(f"© {ahora_argentina().year} INVAP Ingeniería S.A. | Gabriel")
