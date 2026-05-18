@@ -146,6 +146,12 @@ class InspeccionEngine:
             regla.get("norma_principal", "")
         )
 
+        # Referencia interna para Coiled Tubing.
+        # Permite trabajar con una guía interna cuando no se dispone
+        # de las normas oficiales completas en PDF.
+        if not norma_resuelta and str(regla.get("dominio", "")).startswith("COILED_TUBING"):
+            norma_resuelta = self.buscar_referencia_interna_coiled_tubing(lista_normas)
+
         if not norma_resuelta:
             norma_resuelta = self.buscar_norma_por_codigo(
                 lista_normas,
@@ -170,6 +176,36 @@ class InspeccionEngine:
     # =========================================================
     # MATRIZ NORMATIVA BASE DEL MVP
     # =========================================================
+
+    def buscar_referencia_interna_coiled_tubing(self, lista_normas):
+        """
+        Busca la guía interna de Coiled Tubing cargada en el bucket.
+        Se usa cuando no se dispone de las normas oficiales completas,
+        pero sí de una guía técnica interna validada para el MVP.
+        """
+        candidatos = [
+            "INVAP - GUIA COILED TUBING - 2026.pdf",
+            "INVAP - GUÍA COILED TUBING - 2026.pdf",
+            "INVAP - COILED TUBING - 2026.pdf",
+            "INVAP - GUIA CT - 2026.pdf",
+        ]
+
+        for candidato in candidatos:
+            encontrada = self.buscar_norma_exacta(lista_normas, candidato)
+            if encontrada:
+                return encontrada
+
+        # Búsqueda flexible por nombre
+        for norma in lista_normas:
+            n = self.normalizar_texto(str(norma))
+            if "coiled" in n and "tubing" in n:
+                return norma
+            if "guia" in n and "ct" in n:
+                return norma
+
+        return None
+
+
     def obtener_matriz_normativa(self):
         """
         Matriz normativa inicial para inspección de campo petrolera.
@@ -182,6 +218,215 @@ class InspeccionEngine:
         """
 
         return [
+
+            # -------------------------------------------------
+            # COILED TUBING - REFERENCIA INTERNA INVAP
+            # -------------------------------------------------
+            {
+                "dominio": "COILED_TUBING_WELL_CONTROL",
+                "familia": "INVAP_INTERNA",
+                "norma_principal": "INVAP - GUIA COILED TUBING - 2026.pdf",
+                "codigos_principal": ["COILED", "TUBING", "CT"],
+                "normas_relacionadas": [],
+                "codigos_relacionados": [],
+                "keywords_fuertes": [
+                    "coiled tubing",
+                    "ct unit",
+                    "unidad de coiled tubing",
+                    "equipo de coiled tubing",
+                    "ct bop",
+                    "bop stack",
+                    "stripper",
+                    "packoff",
+                    "well control",
+                    "control de pozo",
+                    "kill line",
+                    "choke line",
+                    "rams",
+                    "pipe rams",
+                    "slip rams",
+                    "shear rams",
+                    "blind rams",
+                    "válvula check",
+                    "valvula check",
+                    "bpv",
+                    "acumulador",
+                    "sistema hidráulico de control",
+                    "sistema hidraulico de control"
+                ],
+                "keywords_falla": [
+                    "fuga",
+                    "pérdida de presión",
+                    "perdida de presion",
+                    "no retiene presión",
+                    "no retiene presion",
+                    "falla de accionamiento",
+                    "no acciona",
+                    "no cierra",
+                    "no abre",
+                    "prueba no satisfactoria",
+                    "resultado no satisfactorio",
+                    "sin certificado",
+                    "certificado vencido",
+                    "falla funcional",
+                    "pérdida de estanqueidad",
+                    "perdida de estanqueidad"
+                ],
+                "requiere_falla": False,
+                "peso": 126
+            },
+            {
+                "dominio": "COILED_TUBING_STRING",
+                "familia": "INVAP_INTERNA",
+                "norma_principal": "INVAP - GUIA COILED TUBING - 2026.pdf",
+                "codigos_principal": ["COILED", "TUBING", "CT"],
+                "normas_relacionadas": [],
+                "codigos_relacionados": [],
+                "keywords_fuertes": [
+                    "sarta enrollada",
+                    "tubería enrollada",
+                    "tuberia enrollada",
+                    "coiled tubing string",
+                    "ct string",
+                    "tubería de coiled tubing",
+                    "tuberia de coiled tubing",
+                    "carrete",
+                    "reel",
+                    "fatiga",
+                    "ciclos",
+                    "vida útil",
+                    "vida util",
+                    "vida remanente",
+                    "ovalización",
+                    "ovalizacion",
+                    "pérdida de espesor",
+                    "perdida de espesor",
+                    "corrosión",
+                    "corrosion",
+                    "grado ct70",
+                    "grado ct80",
+                    "grado ct90",
+                    "grado ct100",
+                    "grado ct110",
+                    "mtr",
+                    "certificado de fabricación",
+                    "certificado de fabricacion"
+                ],
+                "keywords_falla": [
+                    "corrosión",
+                    "corrosion",
+                    "deformación",
+                    "deformacion",
+                    "ovalización",
+                    "ovalizacion",
+                    "fisura",
+                    "marca",
+                    "pérdida de espesor",
+                    "perdida de espesor",
+                    "fatiga",
+                    "corte",
+                    "reparación",
+                    "reparacion",
+                    "sin trazabilidad",
+                    "sin historial"
+                ],
+                "requiere_falla": False,
+                "peso": 124
+            },
+            {
+                "dominio": "COILED_TUBING_SURFACE_EQUIPMENT",
+                "familia": "INVAP_INTERNA",
+                "norma_principal": "INVAP - GUIA COILED TUBING - 2026.pdf",
+                "codigos_principal": ["COILED", "TUBING", "CT"],
+                "normas_relacionadas": [],
+                "codigos_relacionados": [],
+                "keywords_fuertes": [
+                    "injector head",
+                    "inyector",
+                    "cabeza inyectora",
+                    "gooseneck",
+                    "cuello de ganso",
+                    "reel",
+                    "carrete",
+                    "spooling",
+                    "power pack",
+                    "powerpack",
+                    "paquete hidráulico",
+                    "paquete hidraulico",
+                    "consola de control",
+                    "cabina",
+                    "mordazas",
+                    "cadenas",
+                    "bandas",
+                    "rodillos",
+                    "alineación",
+                    "alineacion",
+                    "sistema hidráulico",
+                    "sistema hidraulico"
+                ],
+                "keywords_falla": [
+                    "desalineación",
+                    "desalineacion",
+                    "fuga hidráulica",
+                    "fuga hidraulica",
+                    "desgaste",
+                    "rotura",
+                    "falla",
+                    "no acciona",
+                    "pérdida de presión",
+                    "perdida de presion",
+                    "mordaza dañada",
+                    "mordaza danada",
+                    "rodillo dañado",
+                    "rodillo danado"
+                ],
+                "requiere_falla": False,
+                "peso": 122
+            },
+            {
+                "dominio": "COILED_TUBING_IZAJE_GRUA",
+                "familia": "INVAP_INTERNA",
+                "norma_principal": "INVAP - GUIA COILED TUBING - 2026.pdf",
+                "codigos_principal": ["B30.5", "COILED", "TUBING"],
+                "normas_relacionadas": [],
+                "codigos_relacionados": [],
+                "keywords_fuertes": [
+                    "coiled tubing",
+                    "grúa",
+                    "grua",
+                    "pluma",
+                    "grúa móvil",
+                    "grua movil",
+                    "grúa sobre camión",
+                    "grua sobre camion",
+                    "izaje",
+                    "gancho",
+                    "pasteca",
+                    "estabilizadores",
+                    "tabla de carga",
+                    "indicador de momento",
+                    "anti two-block",
+                    "limitador de carga"
+                ],
+                "keywords_falla": [
+                    "certificado vencido",
+                    "sin certificado",
+                    "fisura",
+                    "deformación",
+                    "deformacion",
+                    "fuga hidráulica",
+                    "fuga hidraulica",
+                    "gancho dañado",
+                    "gancho danado",
+                    "cable dañado",
+                    "cable danado",
+                    "limitador fuera de servicio",
+                    "alarma fuera de servicio"
+                ],
+                "requiere_falla": False,
+                "peso": 118
+            },
+
             # -------------------------------------------------
             # CONTROL DE POZO / ACUMULADORES / BOP
             # -------------------------------------------------
@@ -1068,6 +1313,7 @@ class InspeccionEngine:
             "2. Para componentes específicos de izaje, rigging o hidráulica, pueden prevalecer ASME/IRAM.\n"
             "3. No elegir por similitud superficial de palabras; priorizar sistema + componente + modo de falla.\n\n"
             "Categorías posibles:\n"
+            "- COILED_TUBING: equipo de coiled tubing, CT unit, sarta enrollada, injector head, reel, gooseneck, stripper, packoff, CT BOP.\n"
             "- CONTROL_POZO: acumuladores, bombas neumáticas, válvulas de alivio, BOP, rams, preventores.\n"
             "- CHOKE_MANIFOLD: choke line, kill line, manifold, check valve, HCR.\n"
             "- ESTRUCTURA: fisuras, soldaduras, bancadas, mástiles, subestructuras, pasarelas.\n"
@@ -1104,7 +1350,33 @@ class InspeccionEngine:
         # -----------------------------------------------------
         lista_final = lista_normas.copy()
 
-        if "CONTROL_POZO" in dominio or any(x in hallazgo_lower for x in [
+
+        if "COILED_TUBING" in dominio or any(x in hallazgo_lower for x in [
+            "coiled tubing",
+            "ct unit",
+            "unidad de coiled tubing",
+            "equipo de coiled tubing",
+            "sarta enrollada",
+            "tuberia enrollada",
+            "tubería enrollada",
+            "injector head",
+            "inyector",
+            "gooseneck",
+            "cuello de ganso",
+            "stripper",
+            "packoff",
+            "reel",
+            "carrete",
+            "ct bop",
+            "power pack"
+        ]):
+            referencia_ct = self.buscar_referencia_interna_coiled_tubing(lista_normas)
+            lista_final = [referencia_ct] if referencia_ct else [
+                n for n in lista_normas
+                if any(x in self.normalizar_texto(n) for x in ["coiled", "tubing", "guia ct"])
+            ]
+
+        elif "CONTROL_POZO" in dominio or any(x in hallazgo_lower for x in [
             "acumulador",
             "bomba neumatica",
             "bombas neumaticas",
@@ -1250,6 +1522,7 @@ class InspeccionEngine:
             "CRITERIO OBLIGATORIO:\n"
             "- No elijas por similitud superficial de palabras.\n"
             "- Priorizá sistema afectado + componente + modo de falla.\n"
+            "- Coiled Tubing / CT unit / injector / reel / gooseneck / stripper / CT BOP => guía interna INVAP Coiled Tubing si está disponible.\n"
             "- Acumulador / bombas neumáticas / válvula de alivio / BOP => API 16D.\n"
             "- Choke line / kill line / manifold / HCR / check valve => API 16C.\n"
             "- Mástil / subestructura / bancada / soldadura / fisura => API 4G y API 4F.\n"
@@ -1311,6 +1584,27 @@ class InspeccionEngine:
                 return lista_final[0]
             return None
 
+
+    def es_referencia_interna_invap(self, norma_path):
+        """
+        Detecta documentos internos INVAP usados como referencia técnica.
+        Esto evita presentar una guía interna como si fuera una norma oficial completa.
+        """
+        if not norma_path:
+            return False
+
+        nombre = self.normalizar_texto(str(norma_path))
+        return (
+            "invap" in nombre
+            and (
+                "guia" in nombre
+                or "guía" in nombre
+                or "coiled tubing" in nombre
+                or "coiled" in nombre
+            )
+        )
+
+
     # =========================================================
     # CONSULTA RAG SOBRE PDF ELEGIDO
     # =========================================================
@@ -1321,6 +1615,8 @@ class InspeccionEngine:
                 "Se recomienda revisión técnica por ingeniería.",
                 None
             )
+
+        referencia_interna = self.es_referencia_interna_invap(norma_path)
 
         storage_client = storage.Client(credentials=self.creds, project=self.project_id)
         bucket = storage_client.bucket(self.bucket_name)
@@ -1364,8 +1660,30 @@ class InspeccionEngine:
 
             clasificacion = self.ultima_clasificacion_normativa or {}
 
+            if referencia_interna:
+                etiqueta_documento = "Referencia documental interna"
+                instrucciones_referencia = (
+                    "MODO REFERENCIA INTERNA INVAP:\n"
+                    "- El documento seleccionado es una guía técnica interna, no una norma oficial completa.\n"
+                    "- No presentes la guía como si fuera una norma API/ASME oficial.\n"
+                    "- Usá la frase 'Referencia documental utilizada' en lugar de 'Norma de referencia'.\n"
+                    "- Si la guía menciona normas API/ASME, presentalas como 'normativa técnica asociada según guía'.\n"
+                    "- No afirmes que una norma oficial exige algo si el texto recuperado pertenece solo a la guía interna.\n"
+                )
+                estructura_referencia = (
+                    "**Referencia documental utilizada:** [Archivo interno INVAP utilizado]\n"
+                    "**Normativa técnica asociada según guía:** [API/ASME mencionadas en la guía, si corresponde]\n"
+                )
+            else:
+                etiqueta_documento = "Norma"
+                instrucciones_referencia = (
+                    "MODO NORMA OFICIAL / DOCUMENTO NORMATIVO:\n"
+                    "- Usá la frase 'Norma de referencia' cuando el documento corresponda a una norma oficial cargada.\n"
+                )
+                estructura_referencia = "**Norma de referencia:** [Norma usada]\n"
+
             prompt_tecnico = (
-                f"SISTEMA DE INTEGRIDAD INVAP | Norma: {norma_path}\n"
+                f"SISTEMA DE INTEGRIDAD INVAP | {etiqueta_documento}: {norma_path}\n"
                 "==========================================================\n"
                 f"CONTEXTO OPERATIVO:\n{self.contexto_operativo}\n\n"
                 f"CLASIFICACIÓN NORMATIVA PREVIA:\n{json.dumps(clasificacion, ensure_ascii=False, default=str)}\n"
@@ -1376,17 +1694,22 @@ class InspeccionEngine:
                 "1. Tu informe debe basarse principalmente en el contexto técnico recuperado del PDF.\n"
                 "2. No cites requerimientos de otras normas que no aparezcan en el texto recuperado.\n"
                 "3. Si el texto no menciona criterios específicos para el hallazgo, indicá: "
-                "'Criterio no encontrado en esta sección de la norma'.\n"
+                "'Criterio no encontrado en esta sección del documento'.\n"
                 "4. Redactá como asistente técnico de inspección, no como autoridad normativa final.\n"
-                "5. Mantené trazabilidad entre componente, condición observada, evaluación y acción recomendada.\n\n"
+                "5. Mantené trazabilidad entre componente, condición observada, evaluación y acción recomendada.\n"
+                f"{instrucciones_referencia}\n"
                 "### Estructura del Informe:\n"
                 "**Componente:** [Nombre]\n"
                 "**Condición:** [Descripción técnica del daño observado]\n"
-                "**Norma de referencia:** [Norma usada]\n"
+                f"{estructura_referencia}"
                 "**Evaluación:** [Criterio recuperado o aclaración si no se encontró]\n"
                 "**Acción recomendada:** [Acción técnica conservadora]\n"
                 "**Observación:** [Indicar si requiere validación de ingeniería]\n\n"
-                f"Hallazgo original del inspector:\n{hallazgo}"
+                f"Hallazgo original del inspector:\n{hallazgo}\n\n"
+                "REGLA DE REDACCIÓN FINAL:\n"
+                "- Si el documento usado es una guía interna INVAP, no escribas 'Norma de referencia: API...'.\n"
+                "- En ese caso escribí: 'Referencia documental utilizada: INVAP - GUIA COILED TUBING - 2026.pdf'.\n"
+                "- Luego, si corresponde, agregá: 'Normativa técnica asociada según guía: API RP 16ST / API RP 5C8 / API Spec 5ST / API RP 5C7 / ASME B30.5'.\n"
             )
 
             contenidos = [prompt_tecnico]
@@ -1475,6 +1798,29 @@ class InspeccionEngine:
             for norma in lista_normas:
                 n = self.normalizar_texto(norma)
                 score = 0
+
+
+                if any(x in pregunta_lower for x in [
+                    "coiled tubing",
+                    "ct unit",
+                    "unidad de coiled tubing",
+                    "equipo de coiled tubing",
+                    "sarta enrollada",
+                    "tuberia enrollada",
+                    "tubería enrollada",
+                    "injector head",
+                    "inyector",
+                    "gooseneck",
+                    "cuello de ganso",
+                    "stripper",
+                    "packoff",
+                    "reel",
+                    "carrete",
+                    "ct bop",
+                    "power pack"
+                ]):
+                    if any(x in n for x in ["coiled", "tubing", "guia ct"]):
+                        score += 9
 
                 if any(x in pregunta_lower for x in [
                     "acumulador",
