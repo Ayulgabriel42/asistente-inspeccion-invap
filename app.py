@@ -194,9 +194,14 @@ SISTEMAS_AFECTADOS = [
 
 CRITICIDADES = [
     "Crítico",
-    "Alto",
-    "Medio",
-    "Bajo"
+    "Mayor",
+    "Menor"
+]
+
+TIPOS_INSPECCION = [
+    "Documental",
+    "Visual",
+    "Funcional"
 ]
 
 ESTADOS_GESTION = [
@@ -210,7 +215,7 @@ MENU_ITEMS = [
     "Consultas Normativas",
     "Anotaciones",
     "Registro de hallazgo",
-    "QA / Auditoría",
+    "Corrección Informes FE-44",
 ]
 
 
@@ -680,6 +685,7 @@ def registros_a_dataframe(registros):
         "equipo",
         "tipo_equipo",
         "sistema_afectado",
+        "tipo_inspeccion",
         "criticidad",
         "estado",
         "norma_detectada",
@@ -729,6 +735,9 @@ def validar_contexto_archivo(contexto, hallazgo, informe, norma):
     if not contexto.get("sistema_afectado"):
         faltantes.append("Sistema afectado")
 
+    if not contexto.get("tipo_inspeccion"):
+        faltantes.append("Tipo de inspección")
+
     if not contexto.get("criticidad"):
         faltantes.append("Criticidad")
 
@@ -760,6 +769,7 @@ def markdown_informe(contexto, norma, hallazgo, informe):
 - **Equipo / Identificación:** {contexto.get('equipo', '')}
 - **Tipo de equipo:** {contexto.get('tipo_equipo', '')}
 - **Sistema afectado:** {contexto.get('sistema_afectado', '')}
+- **Tipo de inspección:** {contexto.get('tipo_inspeccion', '')}
 - **Criticidad:** {contexto.get('criticidad', '')}
 - **Estado de gestión:** {contexto.get('estado', '')}
 - **Norma detectada:** {nombre_norma_limpio(norma)}
@@ -1094,7 +1104,8 @@ def init_session_state():
         "equipo_inspeccion": "",
         "tipo_equipo_inspeccion": "Workover",
         "sistema_afectado_inspeccion": "Estructura",
-        "criticidad_inspeccion": "Medio",
+        "tipo_inspeccion": "Visual",
+        "criticidad_inspeccion": "Mayor",
         "estado_inspeccion": "Pendiente",
         "contexto_inspeccion_actual": {},
         "ruta_ultimo_archivo": "",
@@ -1111,6 +1122,10 @@ def init_session_state():
         "consulta_norma_input": "",
         "respuesta_consulta_norma": "",
         "audio_consulta_procesado": False,
+        "chat_normativo_mensajes": [],
+        "contexto_ultima_consulta_normativa": {},
+        "chat_normativo_reset_counter": 0,
+        "chat_normativo_ui_version": "",
 
         # Anotaciones
         "anotaciones": [],
@@ -1132,6 +1147,21 @@ def init_session_state():
         st.session_state["menu_principal"] = "Dashboard operativo"
     if st.session_state.get("menu_principal") == "Asistente de Inspección":
         st.session_state["menu_principal"] = "Registro de hallazgo"
+
+    # Compatibilidad con criticidades usadas en versiones anteriores
+    if st.session_state.get("criticidad_inspeccion") not in CRITICIDADES:
+        mapa_criticidad = {
+            "Alto": "Mayor",
+            "Medio": "Menor",
+            "Bajo": "Menor"
+        }
+        st.session_state["criticidad_inspeccion"] = mapa_criticidad.get(
+            st.session_state.get("criticidad_inspeccion"),
+            "Mayor"
+        )
+
+    if st.session_state.get("tipo_inspeccion") not in TIPOS_INSPECCION:
+        st.session_state["tipo_inspeccion"] = "Visual"
 
 
 def incrementar_resets():
@@ -1418,6 +1448,7 @@ def render_dashboard(df):
         "equipo",
         "tipo_equipo",
         "sistema_afectado",
+        "tipo_inspeccion",
         "criticidad",
         "estado",
         "norma_detectada"
@@ -1502,7 +1533,7 @@ def render_registro_hallazgo(creds, project_id):
             placeholder="Ej.: DLS-343, PAE-007, SAI-212"
         ).strip()
 
-    col4, col5, col6, col7 = st.columns([1, 1.2, 0.9, 1])
+    col4, col5, col6, col7, col8 = st.columns([1, 1.15, 1, 0.9, 1])
 
     with col4:
         tipo_equipo = st.selectbox(
@@ -1521,14 +1552,22 @@ def render_registro_hallazgo(creds, project_id):
         )
 
     with col6:
-        criticidad = st.selectbox(
-            "Criticidad",
-            CRITICIDADES,
-            index=index_seguro(CRITICIDADES, st.session_state.get("criticidad_inspeccion", "Medio")),
-            key="criticidad_inspeccion"
+        tipo_inspeccion = st.selectbox(
+            "Tipo de inspección",
+            TIPOS_INSPECCION,
+            index=index_seguro(TIPOS_INSPECCION, st.session_state.get("tipo_inspeccion", "Visual")),
+            key="tipo_inspeccion"
         )
 
     with col7:
+        criticidad = st.selectbox(
+            "Criticidad",
+            CRITICIDADES,
+            index=index_seguro(CRITICIDADES, st.session_state.get("criticidad_inspeccion", "Mayor")),
+            key="criticidad_inspeccion"
+        )
+
+    with col8:
         estado = st.selectbox(
             "Estado de gestión",
             ESTADOS_GESTION,
@@ -1542,6 +1581,7 @@ def render_registro_hallazgo(creds, project_id):
         "equipo": equipo,
         "tipo_equipo": tipo_equipo,
         "sistema_afectado": sistema_afectado,
+        "tipo_inspeccion": tipo_inspeccion,
         "criticidad": criticidad,
         "estado": estado
     }
@@ -1694,6 +1734,7 @@ def render_registro_hallazgo(creds, project_id):
             f"**Región:** {contexto.get('region', '')} | "
             f"**Cliente:** {contexto.get('cliente', '')} | "
             f"**Equipo:** {contexto.get('equipo', '')} | "
+            f"**Tipo de inspección:** {contexto.get('tipo_inspeccion', '')} | "
             f"**Criticidad:** {contexto.get('criticidad', '')}"
         )
 
@@ -1770,6 +1811,7 @@ def render_registro_hallazgo(creds, project_id):
                                 "equipo": contexto.get("equipo", ""),
                                 "tipo_equipo": contexto.get("tipo_equipo", ""),
                                 "sistema_afectado": contexto.get("sistema_afectado", ""),
+                                "tipo_inspeccion": contexto.get("tipo_inspeccion", ""),
                                 "criticidad": contexto.get("criticidad", ""),
                                 "estado": contexto.get("estado", ""),
                                 "hallazgo_original": hallazgo_archivo,
@@ -1799,100 +1841,116 @@ def render_registro_hallazgo(creds, project_id):
 def render_consultas_normativas():
     st.markdown('<div class="big-section-title">📚 Consultas Normativas</div>', unsafe_allow_html=True)
     st.caption(
-        "Realice una consulta libre por texto, audio o imagen para orientarse "
-        "sobre en qué norma podría encuadrarse un caso."
+        "Consulta normativa asistida por IA sobre la base documental cargada en el bucket. "
+        "Puede realizar una consulta puntual o continuar el análisis mediante el chatbot normativo."
     )
 
-    col_audio, col_texto = st.columns([1, 1.5])
+    # =========================================================
+    # BLOQUE 1 - CONSULTA PUNTUAL
+    # =========================================================
+    st.markdown("### 1. Consulta puntual normativa")
+    st.write(
+        "Use este bloque cuando necesite consultar una norma, un criterio técnico o un caso específico "
+        "a partir de texto, audio o evidencia visual."
+    )
 
-    with col_audio:
-        st.markdown("### Entrada por audio")
+    with st.expander("🎙️ Entrada por audio e imagen opcional", expanded=False):
+        col_audio, col_img = st.columns([1, 1])
 
-        audio_consulta_key = f"audio_consulta_{st.session_state['consulta_audio_reset_counter']}"
-        audio_consulta = st.audio_input(
-            "Dictar consulta normativa",
-            key=audio_consulta_key
-        )
+        with col_audio:
+            audio_consulta_key = f"audio_consulta_{st.session_state['consulta_audio_reset_counter']}"
+            audio_consulta = st.audio_input(
+                "Dictar consulta normativa",
+                key=audio_consulta_key
+            )
 
-        if audio_consulta and not st.session_state.get("audio_consulta_procesado", False):
-            try:
-                with st.spinner("Transcribiendo consulta normativa..."):
-                    audio_bytes = audio_consulta.getvalue()
+            if audio_consulta and not st.session_state.get("audio_consulta_procesado", False):
+                try:
+                    with st.spinner("Transcribiendo consulta normativa..."):
+                        audio_bytes = audio_consulta.getvalue()
 
-                    texto_transcripto = st.session_state["motor"].transcribir_audio(
-                        audio_bytes,
-                        audio_consulta.type
-                    )
+                        texto_transcripto = st.session_state["motor"].transcribir_audio(
+                            audio_bytes,
+                            audio_consulta.type
+                        )
 
-                    st.session_state["consulta_norma_input"] = texto_transcripto
-                    st.session_state["audio_consulta_procesado"] = True
-                    st.session_state["consulta_reset_counter"] += 1
+                        st.session_state["consulta_norma_input"] = texto_transcripto
+                        st.session_state["audio_consulta_procesado"] = True
+                        st.session_state["consulta_reset_counter"] += 1
 
-                    st.rerun()
+                        st.rerun()
 
-            except Exception as e:
-                st.error(f"No se pudo transcribir la consulta normativa: {e}")
+                except Exception as e:
+                    st.error(f"No se pudo transcribir la consulta normativa: {e}")
 
-        st.markdown("### Evidencia visual opcional")
+        with col_img:
+            consulta_up_key = f"consulta_file_uploader_{st.session_state['consulta_upload_reset_counter']}"
+            consulta_img = st.file_uploader(
+                "Adjuntar imagen opcional para la consulta",
+                type=["jpg", "jpeg", "png"],
+                accept_multiple_files=True,
+                key=consulta_up_key
+            )
 
-        consulta_up_key = f"consulta_file_uploader_{st.session_state['consulta_upload_reset_counter']}"
-        consulta_img = st.file_uploader(
-            "Adjuntar imagen opcional para la consulta",
-            type=["jpg", "jpeg", "png"],
-            accept_multiple_files=True,
-            key=consulta_up_key
-        )
+    lista_imgs_consulta = []
 
-        lista_imgs_consulta = []
-
-        if consulta_img:
+    try:
+        if "consulta_img" in locals() and consulta_img:
             for f in consulta_img:
                 try:
                     lista_imgs_consulta.append((f.getvalue(), f.type))
                 except Exception:
                     pass
+    except Exception:
+        lista_imgs_consulta = []
 
-    with col_texto:
-        st.markdown("### Entrada manual")
+    pregunta_key = f"consulta_norma_text_area_{st.session_state['consulta_reset_counter']}"
+    pregunta = st.text_area(
+        "Escriba o revise su consulta",
+        value=st.session_state.get("consulta_norma_input", ""),
+        height=170,
+        placeholder="Ej.: ¿Qué norma podría aplicar si se detectan alambres cortados en una eslinga?",
+        key=pregunta_key
+    )
 
-        pregunta_key = f"consulta_norma_text_area_{st.session_state['consulta_reset_counter']}"
-        pregunta = st.text_area(
-            "Escriba o revise su consulta",
-            value=st.session_state.get("consulta_norma_input", ""),
-            height=210,
-            placeholder="Ej.: ¿Qué norma podría aplicar si se detectan alambres cortados en una eslinga?",
-            key=pregunta_key
-        )
+    st.session_state["consulta_norma_input"] = pregunta
 
-        st.session_state["consulta_norma_input"] = pregunta
+    col_cons_1, col_cons_2 = st.columns([1, 1])
 
-        col_cons_1, col_cons_2 = st.columns([1, 1])
+    with col_cons_1:
+        if st.button("📚 Consultar normativa", width="stretch"):
+            if not pregunta.strip() and not lista_imgs_consulta:
+                st.warning("Ingrese una consulta por texto/audio o adjunte una imagen.")
+            else:
+                st.session_state["consulta_norma_input"] = pregunta
 
-        with col_cons_1:
-            if st.button("📚 Consultar norma", width="stretch"):
-                if not pregunta.strip() and not lista_imgs_consulta:
-                    st.warning("Ingrese una consulta por texto/audio o adjunte una imagen.")
-                else:
-                    st.session_state["consulta_norma_input"] = pregunta
-                    try:
-                        with st.spinner("Consultando normativa..."):
-                            respuesta = st.session_state["motor"].consultar_normas_chat(
-                                pregunta=pregunta,
-                                lista_normas=st.session_state["lista_normas"],
-                                lista_imagenes=lista_imgs_consulta
-                            )
-                            st.session_state["respuesta_consulta_norma"] = respuesta
-                    except Exception as e:
-                        st.error(f"No se pudo resolver la consulta normativa: {e}")
+                try:
+                    with st.spinner("Consultando base normativa..."):
+                        respuesta = st.session_state["motor"].consultar_normas_chat(
+                            pregunta=pregunta,
+                            lista_normas=st.session_state["lista_normas"],
+                            lista_imagenes=lista_imgs_consulta
+                        )
 
-        with col_cons_2:
-            if st.button("🧹 Limpiar consulta", width="stretch"):
-                limpiar_consulta_normativa()
+                        st.session_state["respuesta_consulta_norma"] = respuesta
 
-    st.write("")
+                        # Contexto oculto para el chatbot normativo.
+                        # No se muestra como mensaje inicial, pero permite repreguntas sobre la última consulta puntual.
+                        st.session_state["contexto_ultima_consulta_normativa"] = {
+                            "pregunta": pregunta.strip(),
+                            "respuesta": respuesta
+                        }
+
+                except Exception as e:
+                    st.error(f"No se pudo resolver la consulta normativa: {e}")
+
+    with col_cons_2:
+        if st.button("🧹 Limpiar consulta puntual", width="stretch"):
+            limpiar_consulta_normativa()
 
     if st.session_state.get("respuesta_consulta_norma"):
-        st.markdown("### Respuesta")
+        st.write("")
+        st.markdown("#### Respuesta de consulta puntual")
         st.markdown(st.session_state["respuesta_consulta_norma"])
 
         generar_descarga_txt(
@@ -1900,8 +1958,114 @@ def render_consultas_normativas():
             contenido=st.session_state["respuesta_consulta_norma"],
             label="💾 Descargar respuesta"
         )
-    else:
-        st.info("La respuesta de la consulta normativa aparecerá aquí.")
+
+    st.divider()
+
+    # =========================================================
+    # BLOQUE 2 - CHATBOT NORMATIVO
+    # =========================================================
+
+    # Limpieza única de historial visible heredado.
+    # La consulta puntual queda como contexto oculto, pero no aparece en el chat.
+    if st.session_state.get("chat_normativo_ui_version") != "chat_contexto_oculto_v4":
+        st.session_state["chat_normativo_mensajes"] = []
+        st.session_state["chat_normativo_reset_counter"] = st.session_state.get("chat_normativo_reset_counter", 0) + 1
+        st.session_state["chat_normativo_ui_version"] = "chat_contexto_oculto_v4"
+
+    st.markdown("### 2. Chatbot normativo")
+    st.caption(
+        "Use este chat para repreguntas o consultas técnicas. "
+        "La consulta puntual queda disponible como contexto oculto, pero no se muestra como inicio del chat."
+    )
+
+    # Input arriba para uso práctico en celular
+    st.markdown("#### Nueva consulta al chatbot")
+
+    chat_input_key = f"chat_normativo_input_{st.session_state.get('chat_normativo_reset_counter', 0)}"
+
+    pregunta_chat = st.text_area(
+        "Escriba su consulta técnica",
+        value="",
+        height=115,
+        placeholder=(
+            "Ej.: ¿Por qué no aplicaría ASME B30.30 como norma principal en este caso?\n"
+            "Ej.: ¿Cómo llegaste a API RP 9B?"
+        ),
+        key=chat_input_key
+    )
+
+    col_chat_send, col_chat_hint = st.columns([1, 2])
+
+    with col_chat_send:
+        enviar_chat = st.button("💬 Enviar consulta", width="stretch")
+
+    with col_chat_hint:
+        if st.session_state.get("contexto_ultima_consulta_normativa"):
+            st.caption("Puede hacer repreguntas sobre la última consulta normativa puntual, aunque no aparezca como mensaje inicial.")
+
+    if enviar_chat:
+        pregunta_chat_limpia = pregunta_chat.strip()
+
+        if not pregunta_chat_limpia:
+            st.warning("Escriba una consulta antes de enviar.")
+        else:
+            st.session_state["chat_normativo_mensajes"].append({
+                "role": "user",
+                "content": pregunta_chat_limpia
+            })
+
+            try:
+                with st.spinner("Analizando consulta normativa..."):
+                    respuesta_chat = st.session_state["motor"].responder_chatbot_normativo(
+                        pregunta=pregunta_chat_limpia,
+                        lista_normas=st.session_state["lista_normas"],
+                        historial=st.session_state["chat_normativo_mensajes"],
+                        contexto_consulta=st.session_state.get("contexto_ultima_consulta_normativa", {})
+                    )
+
+                    st.session_state["chat_normativo_mensajes"].append({
+                        "role": "assistant",
+                        "content": respuesta_chat
+                    })
+
+                    st.session_state["chat_normativo_reset_counter"] = st.session_state.get("chat_normativo_reset_counter", 0) + 1
+                    st.rerun()
+
+            except Exception as e:
+                st.error(f"No se pudo responder desde el chatbot normativo: {e}")
+
+    st.write("")
+
+    st.markdown("#### Conversación técnica")
+    st.caption(f"Base normativa disponible: {len(st.session_state.get('lista_normas', []))} documentos cargados.")
+    if st.session_state.get("contexto_ultima_consulta_normativa"):
+        st.caption("Contexto disponible: última consulta normativa puntual cargada para repreguntas.")
+
+    mensajes = st.session_state.get("chat_normativo_mensajes", [])
+
+    with st.container(height=480, border=True):
+        if not mensajes:
+            st.markdown(
+                """
+                **Chat listo.**
+
+                Escriba una consulta técnica arriba para iniciar una conversación.
+                También puede hacer repreguntas sobre la última consulta normativa puntual.
+                """
+            )
+        else:
+            for msg in mensajes[-20:]:
+                with st.chat_message(msg.get("role", "assistant")):
+                    st.markdown(msg.get("content", ""))
+
+    st.write("")
+    col_clear_left, col_clear_mid, col_clear_right = st.columns([1, 1.2, 1])
+
+    with col_clear_mid:
+        if st.button("🗑️ Limpiar chat", width="stretch"):
+            st.session_state["chat_normativo_mensajes"] = []
+            st.session_state["chat_normativo_reset_counter"] = st.session_state.get("chat_normativo_reset_counter", 0) + 1
+            st.rerun()
 
 
 def render_anotaciones():
@@ -2011,51 +2175,103 @@ def render_anotaciones():
 
 
 def render_qa():
-    st.markdown('<div class="big-section-title">🧪 QA / Auditoría</div>', unsafe_allow_html=True)
+    st.markdown('<div class="big-section-title">✍️ Corrección de informes FE-44 / QA</div>', unsafe_allow_html=True)
 
-    st.subheader("Agente de Auditoría QA")
-    st.write("Cargue un reporte PDF para validar consistencia técnica.")
+    st.subheader("Agente corrector de informes técnicos")
+    st.write(
+        "Cargue un informe PDF o Word, o pegue texto manualmente, para validar estructura FE-44, "
+        "consistencia técnica y redacción profesional."
+    )
 
-    pdf_qa_key = f"qa_pdf_{st.session_state['qa_reset_counter']}"
-    pdf_qa = st.file_uploader(
-        "Subir reporte PDF",
-        type=["pdf"],
-        key=pdf_qa_key
+    modo_revision = st.selectbox(
+        "Modo de análisis",
+        [
+            "Revisión técnica completa",
+            "Auditoría estructural FE-44",
+            "Corrección de redacción",
+            "Consistencia técnica",
+            "Resumen ejecutivo y datos faltantes"
+        ]
+    )
+
+    archivo_key = f"qa_archivo_{st.session_state['qa_reset_counter']}"
+    archivo_qa = st.file_uploader(
+        "Subir informe PDF o Word",
+        type=["pdf", "docx"],
+        key=archivo_key
+    )
+
+    texto_manual = st.text_area(
+        "O pegar texto del informe manualmente",
+        value="",
+        height=180,
+        placeholder="Pegue aquí el texto del informe si no desea subir un archivo..."
     )
 
     prompt_qa = st.text_area(
-        "Instrucción de auditoría",
-        value="Valida formato FE-44 y consistencia técnica del reporte.",
+        "Instrucción específica para este informe",
+        value=(
+            "Indicar qué aspecto específico querés revisar. Por ejemplo: validar formato FE-44, consistencia técnica, redacción formal, "
+            "ortografía, datos faltantes y coherencia entre introducción, desarrollo y conclusión."
+        ),
         height=120
     )
 
-    if st.button("🧪 Auditar reporte", width="stretch"):
-        if not pdf_qa:
-            st.warning("Suba un PDF para auditar.")
+    if st.button("✍️ Analizar / corregir informe", width="stretch"):
+        if not archivo_qa and not texto_manual.strip():
+            st.warning("Suba un PDF/DOCX o pegue texto del informe para analizar.")
         else:
             try:
-                with st.spinner("Analizando calidad..."):
-                    res_qa = st.session_state["motor"].analizar_pdf_qa(
-                        pdf_qa.read(),
-                        prompt_qa
+                with st.spinner("Analizando informe FE-44..."):
+                    instruccion_final = (
+                        f"Modo de revisión seleccionado: {modo_revision}.\n"
+                        f"Instrucción adicional: {prompt_qa}"
                     )
+
+                    if texto_manual.strip():
+                        res_qa = st.session_state["motor"].analizar_texto_qa(
+                            texto_manual.strip(),
+                            instruccion_final
+                        )
+
+                    elif archivo_qa:
+                        nombre_archivo = archivo_qa.name.lower()
+                        contenido = archivo_qa.read()
+
+                        if nombre_archivo.endswith(".pdf"):
+                            res_qa = st.session_state["motor"].analizar_pdf_qa(
+                                contenido,
+                                instruccion_final
+                            )
+
+                        elif nombre_archivo.endswith(".docx"):
+                            res_qa = st.session_state["motor"].analizar_docx_qa(
+                                contenido,
+                                instruccion_final
+                            )
+
+                        else:
+                            res_qa = "Formato de archivo no soportado. Use PDF o DOCX."
+
                     st.session_state["qa_resultado"] = res_qa
+
             except Exception as e:
-                st.error(f"No se pudo auditar el reporte: {e}")
+                st.error(f"No se pudo analizar/corregir el informe: {e}")
 
     st.write("")
 
     if st.session_state.get("qa_resultado"):
-        st.success("Auditoría completada")
+        st.success("Análisis completado")
         st.markdown(st.session_state["qa_resultado"])
 
         generar_descarga_txt(
-            nombre_base="Auditoria_QA",
+            nombre_base="Correccion_Informe_FE44",
             contenido=st.session_state["qa_resultado"],
-            label="💾 Descargar auditoría"
+            label="💾 Descargar corrección"
         )
     else:
-        st.info("El resultado de la auditoría aparecerá aquí.")
+        st.info("El resultado de la corrección aparecerá aquí.")
+
 
 
 
@@ -2421,7 +2637,7 @@ elif st.session_state["menu_principal"] == "Anotaciones":
 elif st.session_state["menu_principal"] == "Registro de hallazgo":
     render_registro_hallazgo(creds, project_id)
 
-elif st.session_state["menu_principal"] == "QA / Auditoría":
+elif st.session_state["menu_principal"] == "Corrección Informes FE-44":
     render_qa()
 
 

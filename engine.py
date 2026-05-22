@@ -1960,6 +1960,165 @@ class InspeccionEngine:
         except Exception as e:
             return f"No se pudo responder la consulta normativa: {e}"
 
+
+    # =========================================================
+    # CHATBOT NORMATIVO CON RAZONAMIENTO DE MATRIZ
+    # =========================================================
+    def responder_chatbot_normativo(self, pregunta, lista_normas, historial=None, contexto_consulta=None):
+        """
+        Chatbot normativo conversacional.
+        Usa la misma matriz técnica que Registro de hallazgo para evitar que el modelo
+        acepte automáticamente normas sugeridas por el usuario.
+        """
+        if not pregunta or not str(pregunta).strip():
+            return "No se recibió ninguna consulta."
+
+        if not lista_normas:
+            return "No hay normas disponibles cargadas en el sistema."
+
+        historial = historial or []
+        contexto_consulta = contexto_consulta or {}
+
+        # 1) Clasificación técnica por matriz, igual que Registro de hallazgo.
+        norma_matriz = None
+        clasificacion_matriz = None
+
+        try:
+            norma_matriz = self.clasificar_norma_ia(
+                hallazgo=pregunta,
+                lista_normas=lista_normas,
+                lista_imagenes=None
+            )
+            clasificacion_matriz = self.ultima_clasificacion_normativa
+        except Exception:
+            norma_matriz = None
+            clasificacion_matriz = None
+
+        # 2) Detectar si el usuario propone explícitamente una norma.
+        norma_mencionada = None
+        try:
+            norma_mencionada = self.resolver_norma_mencionada_en_pregunta(
+                pregunta,
+                lista_normas
+            )
+        except Exception:
+            norma_mencionada = None
+
+        # 3) Historial compacto.
+        historial_reciente = historial[-8:] if historial else []
+        historial_txt = "\n\n".join([
+            f"{m.get('role', '').upper()}: {m.get('content', '')}"
+            for m in historial_reciente
+        ])
+
+        contexto_consulta_txt = ""
+        if contexto_consulta:
+            pregunta_previa = contexto_consulta.get("pregunta", "")
+            respuesta_previa = contexto_consulta.get("respuesta", "")
+            contexto_consulta_txt = (
+                "ÚLTIMA CONSULTA NORMATIVA PUNTUAL, SOLO COMO CONTEXTO OCULTO PARA REPREGUNTAS:\n"
+                f"Pregunta previa: {pregunta_previa}\n\n"
+                f"Respuesta previa: {respuesta_previa}\n"
+            )
+
+        # 4) Normas candidatas priorizadas.
+        normas_candidatas = []
+
+        if norma_matriz:
+            normas_candidatas.append(norma_matriz)
+
+        if norma_mencionada and norma_mencionada not in normas_candidatas:
+            normas_candidatas.append(norma_mencionada)
+
+        if clasificacion_matriz and isinstance(clasificacion_matriz, dict):
+            for nr in clasificacion_matriz.get("normas_relacionadas", []):
+                if nr not in normas_candidatas:
+                    normas_candidatas.append(nr)
+
+        if not normas_candidatas:
+            resultado_matriz = self.clasificar_por_matriz_normativa(
+                pregunta,
+                lista_normas
+            )
+
+            if resultado_matriz:
+                principal = resultado_matriz.get("norma_principal")
+                if principal and principal not in normas_candidatas:
+                    normas_candidatas.append(principal)
+
+                for nr in resultado_matriz.get("normas_relacionadas", []):
+                    if nr not in normas_candidatas:
+                        normas_candidatas.append(nr)
+
+        if not normas_candidatas:
+            normas_api = [
+                n for n in lista_normas
+                if self.obtener_ente_normativo(n) == "API"
+            ]
+            normas_candidatas = normas_api[:8] if normas_api else lista_normas[:8]
+
+        prompt = (
+            "CHATBOT NORMATIVO INVAP INGENIERÍA S.A.\n"
+            "=========================================\n\n"
+            "Actuás como un asistente técnico conversacional para inspecciones de campo "
+            "en equipos petroleros, componentes de izaje, control de pozo, eslingas, cables, "
+            "mástiles, acumuladores, bombas, BOP, líneas, manifolds y sistemas asociados.\n\n"
+
+            "OBJETIVO:\n"
+            "Responder de forma conversacional, clara y técnica. No te limites a listar normas. "
+            "Explicá el razonamiento cuando el usuario lo pida.\n\n"
+
+            "REGLAS IMPORTANTES:\n"
+            "1. No aceptes automáticamente una norma sugerida por el usuario.\n"
+            "2. Si el usuario propone una norma, comparala contra el sistema afectado, componente, modo de falla "
+            "y matriz normativa interna.\n"
+            "3. Si la norma sugerida puede aplicar, indicá en qué casos aplica y en qué casos no.\n"
+            "4. Si la matriz técnica sugiere otra norma principal, explicá por qué.\n"
+            "5. No inventes artículos, tablas, páginas ni requisitos exactos si no fueron recuperados del PDF.\n"
+            "6. Si el usuario pregunta '¿cómo llegaste a esa norma?', respondé explicando: "
+            "sistema afectado, componente, modo de falla, palabras clave técnicas y normas candidatas.\n"
+            "7. Si no hay información suficiente, pedí el dato técnico faltante.\n"
+            "8. Redactá en español técnico, pero natural, como chatbot.\n"
+            "9. Si existe una última consulta normativa puntual como contexto oculto, usala solo cuando la consulta actual sea una repregunta o haga referencia a esa respuesta previa.\n"
+            "10. No trates la consulta puntual previa como si fuera el primer mensaje visible del chat.\n\n"
+
+            "CRITERIO DE CLASIFICACIÓN PRINCIPAL:\n"
+            "- Acumulador / válvula de alivio / BOP / rams / preventor => priorizar API 16D / API 53 / API 16A según caso.\n"
+            "- Choke line / kill line / manifold / HCR / check valve => priorizar API 16C / API 6A.\n"
+            "- Mástil / subestructura / bancada / soldadura / fisura estructural => priorizar API 4G / API 4F.\n"
+            "- Cable de acero de equipo petrolero, polea, corona, tambor, malacate => priorizar API 9B / API 7K / API 8C según contexto.\n"
+            "- Eslinga con alambres cortados, ojal, alma expuesta o faja de izaje => priorizar ASME B30.9 / IRAM 3914 según disponibilidad.\n"
+            "- Grilletes, pernos y accesorios de rigging => priorizar ASME B30.26.\n"
+            "- Cuerdas/cables como componente general de izaje pueden relacionarse con ASME B30.30, "
+            "pero no debe desplazar automáticamente normas más específicas del equipo o componente inspeccionado.\n\n"
+
+            f"NORMA SUGERIDA POR MATRIZ INTERNA:\n{norma_matriz or 'No determinada'}\n\n"
+            f"CLASIFICACIÓN INTERNA:\n{clasificacion_matriz or 'No disponible'}\n\n"
+            f"NORMA MENCIONADA EXPLÍCITAMENTE POR EL USUARIO:\n{norma_mencionada or 'Ninguna detectada'}\n\n"
+            f"NORMAS CANDIDATAS DISPONIBLES:\n{normas_candidatas[:12]}\n\n"
+            f"{contexto_consulta_txt}\n"
+            f"HISTORIAL RECIENTE DEL CHAT VISIBLE:\n{historial_txt}\n\n"
+            f"CONSULTA ACTUAL DEL USUARIO:\n{pregunta}\n\n"
+
+            "FORMATO DE RESPUESTA:\n"
+            "- Respuesta directa.\n"
+            "- Razonamiento técnico.\n"
+            "- Norma principal sugerida, si corresponde.\n"
+            "- Normas relacionadas, si corresponde.\n"
+            "- Dato faltante o validación recomendada, si corresponde.\n"
+        )
+
+        try:
+            res = self.client.models.generate_content(
+                model=self.model_id,
+                contents=prompt
+            )
+            return res.text
+
+        except Exception as e:
+            return f"No se pudo responder desde el chatbot normativo: {e}"
+
+
     # =========================================================
     # MEMORIA DE LARGO PLAZO
     # =========================================================
@@ -2043,10 +2202,213 @@ class InspeccionEngine:
 
         return res.text.strip()
 
+
+    # =========================================================
+    # QA / CORRECCIÓN DE INFORMES FE-44 SOBRE TEXTO Y DOCX
+    # =========================================================
+    def extraer_texto_docx_bytes(self, docx_bytes):
+        """
+        Extrae texto básico de un archivo DOCX usando solo librerías estándar.
+        Conserva párrafos y contenido de tablas en orden aproximado.
+        """
+        import io
+        import zipfile
+        import xml.etree.ElementTree as ET
+
+        try:
+            with zipfile.ZipFile(io.BytesIO(docx_bytes)) as z:
+                xml_content = z.read("word/document.xml")
+        except Exception as e:
+            return f"No se pudo leer el DOCX: {e}"
+
+        try:
+            root = ET.fromstring(xml_content)
+            ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+
+            bloques = []
+
+            for elem in root.iter():
+                tag = elem.tag.split("}")[-1]
+
+                if tag == "p":
+                    textos = []
+                    for t in elem.iter():
+                        if t.tag.split("}")[-1] == "t" and t.text:
+                            textos.append(t.text)
+                    parrafo = "".join(textos).strip()
+                    if parrafo:
+                        bloques.append(parrafo)
+
+                elif tag == "tr":
+                    celdas = []
+                    for tc in elem.findall(".//w:tc", ns):
+                        textos_celda = []
+                        for t in tc.findall(".//w:t", ns):
+                            if t.text:
+                                textos_celda.append(t.text)
+                        celda = " ".join(textos_celda).strip()
+                        if celda:
+                            celdas.append(celda)
+                    if celdas:
+                        bloques.append(" | ".join(celdas))
+
+            texto = "\n".join(bloques)
+            texto = re.sub(r"\n{3,}", "\n\n", texto)
+
+            return texto.strip()
+
+        except Exception as e:
+            return f"No se pudo extraer texto del DOCX: {e}"
+
+
+    def analizar_texto_qa(self, texto_informe, prompt_p):
+        """
+        Analiza texto extraído o pegado manualmente para corrección FE-44 / QA.
+        """
+        if not texto_informe or not str(texto_informe).strip():
+            return "No se recibió texto suficiente para analizar."
+
+        prompt = (
+            "Eres un agente corrector y auditor QA de informes técnicos de INVAP Ingeniería S.A.\n"
+            "Tu tarea es revisar informes bajo formato FE-44 o derivados, priorizando estructura documental, "
+            "consistencia técnica, trazabilidad y redacción profesional.\n\n"
+
+            "OBJETIVO DEL ANÁLISIS:\n"
+            "Evaluar si el informe es claro, consistente, trazable y formalmente apto para revisión técnica, "
+            "sin alterar datos originales del documento.\n\n"
+
+            "DEBES ANALIZAR:\n"
+            "1. Estructura documental FE-44 o derivada.\n"
+            "2. Coherencia entre título, introducción, objetivo, desarrollo y conclusión.\n"
+            "3. Redacción técnica formal.\n"
+            "4. Ortografía, gramática, tildes y terminología.\n"
+            "5. Datos faltantes o incompletos.\n"
+            "6. Trazabilidad de cantidades, números de serie, precintos, fechas, clientes, equipos y responsables.\n"
+            "7. Diferencia entre rechazo físico, desvío documental y condición no aplicable.\n\n"
+
+            "REGLAS OBLIGATORIAS:\n"
+            "- No inventes datos.\n"
+            "- No agregues normas si no fueron mencionadas en el informe.\n"
+            "- No modifiques códigos, fechas, números de serie, cantidades, clientes, equipos, precintos ni responsables.\n"
+            "- No completes campos vacíos con información supuesta.\n"
+            "- Si un dato falta, indicá 'Dato faltante' en lugar de completarlo.\n"
+            "- Si una sección del FE-44 no aplica al tipo de informe, indicalo como 'No aplicable', no como error.\n"
+            "- No uses expresiones como 'se asume'. En su lugar, recomendá validar el dato con registro de campo o evidencia documental.\n"
+            "- Evitá calificar como 'crítico' un problema meramente formal. Usá severidad crítica solo si afecta seguridad, trazabilidad o validez del informe.\n"
+            "- No marques fechas futuras, recientes o posteriores a la fecha actual como error crítico salvo que exista contradicción interna dentro del documento o el usuario indique explícitamente que la fecha es incorrecta. Si hay duda, clasificalo como 'Dato a validar'.\n"
+            "- No afirmes que un elemento 'no es apto bajo norma' si la norma no fue citada o verificada. En su lugar indicá: 'no debería considerarse apto para uso hasta regularizar o validar su trazabilidad documental, según el procedimiento aplicable'.\n"
+            "- Redactá en español técnico formal, claro e impersonal.\n\n"
+
+            "TRATAMIENTO DE TABLAS EXTENSAS:\n"
+            "- Si el informe contiene tablas largas, listados de números de serie, precintos o cantidades, no reconstruyas la tabla.\n"
+            "- No resumas listados como si fueran definitivos.\n"
+            "- Indicá: 'Mantener tabla original sin modificaciones'.\n"
+            "- Auditá únicamente coherencia general, duplicados aparentes, campos vacíos, datos ilegibles o inconsistencias visibles.\n\n"
+
+            "CLASIFICACIÓN DE OBSERVACIONES:\n"
+            "- Crítica: afecta seguridad, trazabilidad, validez documental o aptitud del informe.\n"
+            "- Mayor: afecta claridad técnica, estructura documental, consistencia del análisis o conclusión.\n"
+            "- Menor: ortografía, estilo, formato, tildes, mayúsculas o redacción.\n\n"
+
+            "FORMATO OBLIGATORIO DE RESPUESTA:\n"
+            "## Estado general\n"
+            "Indicar si el informe es: Apto con observaciones / Requiere correcciones mayores / Incompleto para revisión.\n\n"
+            "## Auditoría estructural FE-44\n"
+            "Listar secciones presentes, faltantes y no aplicables.\n\n"
+            "## Observaciones clasificadas\n"
+            "Separar en Críticas, Mayores y Menores. No exagerar severidad.\n\n"
+            "## Correcciones de redacción detectadas\n"
+            "Listar correcciones concretas con ejemplo antes/después cuando corresponda.\n\n"
+            "## Observaciones técnicas\n"
+            "Indicar problemas de coherencia, trazabilidad o interpretación técnica.\n\n"
+            "## Datos faltantes sugeridos\n"
+            "Listar datos que deberían completarse o validarse.\n\n"
+            "## Texto corregido sugerido\n"
+            "Proponer redacción corregida solo para secciones narrativas. "
+            "Para tablas extensas escribir: 'Mantener tabla original sin modificaciones'.\n\n"
+            "## Recomendación final QA\n"
+            "Indicar próximos pasos antes de emitir o aprobar el informe.\n\n"
+
+            f"INSTRUCCIÓN ESPECÍFICA DEL USUARIO:\n{prompt_p}\n\n"
+            "INFORME A ANALIZAR:\n"
+            "============================================================\n"
+            f"{texto_informe}\n"
+            "============================================================\n"
+        )
+
+        res = self.client.models.generate_content(
+            model=self.model_id,
+            contents=prompt
+        )
+
+        return res.text
+
+
+    def analizar_docx_qa(self, docx_bytes, prompt_p):
+        """
+        Extrae texto de un DOCX y lo analiza con el corrector FE-44 / QA.
+        """
+        texto = self.extraer_texto_docx_bytes(docx_bytes)
+
+        if not texto or texto.startswith("No se pudo"):
+            return texto
+
+        return self.analizar_texto_qa(texto, prompt_p)
+
+
     # =========================================================
     # QA SOBRE PDF
     # =========================================================
     def analizar_pdf_qa(self, pdf_bytes, prompt_p):
+        """
+        Analiza PDF para corrección FE-44 / QA con instrucciones reforzadas.
+        """
+        prompt = (
+            "Eres un agente corrector y auditor QA de informes técnicos de INVAP Ingeniería S.A.\n"
+            "El archivo adjunto es un informe técnico en PDF. Debes revisarlo bajo formato FE-44 o derivado.\n\n"
+
+            "OBJETIVO DEL ANÁLISIS:\n"
+            "Evaluar estructura documental, consistencia técnica, trazabilidad, redacción formal y datos faltantes, "
+            "sin alterar datos originales.\n\n"
+
+            "REGLAS OBLIGATORIAS:\n"
+            "- No inventes datos.\n"
+            "- No agregues normas si no fueron mencionadas en el informe.\n"
+            "- No modifiques códigos, fechas, números de serie, cantidades, clientes, equipos, precintos ni responsables.\n"
+            "- Si un dato falta, indicá 'Dato faltante'.\n"
+            "- Si una sección FE-44 no aplica, marcala como 'No aplicable'.\n"
+            "- No uses 'se asume'; recomendá validar con registro de campo o evidencia documental.\n"
+            "- No califiques como crítico un problema solo formal.\n"
+            "- No marques fechas futuras, recientes o posteriores a la fecha actual como error crítico salvo que exista contradicción interna dentro del documento o el usuario indique explícitamente que la fecha es incorrecta. Si hay duda, clasificalo como 'Dato a validar'.\n"
+            "- No afirmes que un elemento 'no es apto bajo norma' si la norma no fue citada o verificada. En su lugar indicá: 'no debería considerarse apto para uso hasta regularizar o validar su trazabilidad documental, según el procedimiento aplicable'.\n"
+            "- Redactá en español técnico formal, claro e impersonal.\n\n"
+
+            "TRATAMIENTO DE TABLAS EXTENSAS:\n"
+            "- No reconstruyas tablas largas ni listados de números de serie.\n"
+            "- Indicá: 'Mantener tabla original sin modificaciones'.\n"
+            "- Auditá coherencia general, campos vacíos, datos ilegibles, duplicados aparentes o inconsistencias visibles.\n\n"
+
+            "CLASIFICACIÓN DE OBSERVACIONES:\n"
+            "- Crítica: afecta seguridad, trazabilidad, validez documental o aptitud del informe.\n"
+            "- Mayor: afecta claridad técnica, estructura documental o consistencia.\n"
+            "- Menor: ortografía, estilo, formato, tildes, mayúsculas o redacción.\n\n"
+
+            "FORMATO OBLIGATORIO DE RESPUESTA:\n"
+            "## Estado general\n"
+            "## Auditoría estructural FE-44\n"
+            "## Observaciones clasificadas\n"
+            "### Críticas\n"
+            "### Mayores\n"
+            "### Menores\n"
+            "## Correcciones de redacción detectadas\n"
+            "## Observaciones técnicas\n"
+            "## Datos faltantes sugeridos\n"
+            "## Texto corregido sugerido\n"
+            "## Recomendación final QA\n\n"
+
+            f"INSTRUCCIÓN ESPECÍFICA DEL USUARIO:\n{prompt_p}\n"
+        )
+
         res = self.client.models.generate_content(
             model=self.model_id,
             contents=[
@@ -2054,7 +2416,7 @@ class InspeccionEngine:
                     data=pdf_bytes,
                     mime_type="application/pdf"
                 ),
-                prompt_p
+                prompt
             ]
         )
 
