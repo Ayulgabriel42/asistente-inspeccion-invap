@@ -1892,6 +1892,41 @@ def render_consultas_normativas():
                 key=consulta_up_key
             )
 
+            # Cámara opcional para consulta normativa
+            if "consulta_usar_camara_normativa" not in st.session_state:
+                st.session_state["consulta_usar_camara_normativa"] = False
+
+            if "consulta_camara_reset_counter" not in st.session_state:
+                st.session_state["consulta_camara_reset_counter"] = 0
+
+            usar_camara_normativa = st.toggle(
+                "📷 Activar cámara para consulta normativa",
+                value=st.session_state.get("consulta_usar_camara_normativa", False),
+                key=f"consulta_usar_camara_normativa_{st.session_state['consulta_camara_reset_counter']}"
+            )
+
+            st.session_state["consulta_usar_camara_normativa"] = usar_camara_normativa
+
+            consulta_img_camara = None
+
+            if usar_camara_normativa:
+                consulta_img_camara = st.camera_input(
+                    "Tomar imagen para la consulta normativa",
+                    key=f"consulta_normativa_camera_input_{st.session_state['consulta_camara_reset_counter']}"
+                )
+
+                if consulta_img_camara is not None:
+                    st.image(
+                        consulta_img_camara,
+                        caption="Imagen capturada con cámara",
+                        width=350
+                    )
+
+            if st.button("🧹 Limpiar cámara normativa", key="btn_limpiar_camara_normativa"):
+                st.session_state["consulta_usar_camara_normativa"] = False
+                st.session_state["consulta_camara_reset_counter"] += 1
+                st.rerun()
+
     lista_imgs_consulta = []
 
     try:
