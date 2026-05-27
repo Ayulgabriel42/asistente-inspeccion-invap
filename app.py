@@ -559,6 +559,153 @@ p, div, span {
         min-height: 62px !important;
     }
 }
+
+/* =========================================================
+   CHATBOT NORMATIVO - UI TIPO CHAT MODERNO INVAP
+   ========================================================= */
+.invap-chat-hero {
+    background: linear-gradient(135deg, #FFFFFF 0%, #F4F8F6 100%);
+    border: 1px solid #CFE3DA;
+    border-radius: 22px;
+    padding: 18px 20px;
+    margin: 12px 0 18px 0;
+    box-shadow: 0 6px 18px rgba(15, 36, 28, 0.07);
+}
+
+.invap-chat-hero-title {
+    font-size: 1.25rem;
+    font-weight: 900;
+    color: #0F241C;
+    margin-bottom: 6px;
+}
+
+.invap-chat-hero-sub {
+    font-size: 0.98rem;
+    color: #60756D;
+    line-height: 1.45;
+}
+
+.invap-chat-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin: 8px 0 14px 0;
+}
+
+.invap-chat-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    border-radius: 999px;
+    padding: 7px 11px;
+    background: #EAF6F0;
+    color: #004B35;
+    border: 1px solid #CFE3DA;
+    font-size: 0.88rem;
+    font-weight: 800;
+}
+
+.invap-chat-tip {
+    background: #FFFFFF;
+    border: 1px solid #CFE3DA;
+    border-left: 5px solid #007A3D;
+    border-radius: 16px;
+    padding: 13px 15px;
+    color: #60756D;
+    margin: 10px 0 14px 0;
+    box-shadow: 0 4px 12px rgba(15, 36, 28, 0.05);
+}
+
+.invap-chat-empty {
+    background: #FFFFFF;
+    border: 1px dashed #CFE3DA;
+    border-radius: 20px;
+    padding: 22px;
+    color: #60756D;
+    text-align: center;
+}
+
+.invap-chat-empty strong {
+    color: #004B35;
+}
+
+[data-testid="stChatMessage"] {
+    border-radius: 20px !important;
+    border: 1px solid #CFE3DA !important;
+    background: #FFFFFF !important;
+    box-shadow: 0 4px 14px rgba(15, 36, 28, 0.06) !important;
+    padding: 0.75rem 1rem !important;
+    margin: 0.65rem 0 !important;
+}
+
+[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) {
+    background: #F4F8F6 !important;
+    border-color: #DDEBE4 !important;
+}
+
+[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-assistant"]) {
+    background: #FFFFFF !important;
+    border-left: 5px solid #007A3D !important;
+}
+
+.invap-chat-input-label {
+    font-size: 1rem;
+    font-weight: 900;
+    color: #0F241C;
+    margin: 14px 0 6px 0;
+}
+
+.invap-chat-input-help {
+    font-size: 0.92rem;
+    color: #60756D;
+    margin-top: -4px;
+    margin-bottom: 8px;
+}
+
+/* Botones compactos exclusivos del chatbot */
+.st-key-chat_normativo_send_compacto button,
+.st-key-chat_normativo_clear_compacto button {
+    min-height: 46px !important;
+    height: 46px !important;
+    border-radius: 14px !important;
+    font-size: 0.96rem !important;
+    padding: 0.45rem 0.85rem !important;
+    box-shadow: 0 4px 12px rgba(0, 75, 53, 0.16) !important;
+}
+
+.st-key-chat_normativo_send_compacto button {
+    background: linear-gradient(135deg, #007A3D 0%, #004B35 100%) !important;
+    border: 1px solid #004B35 !important;
+    color: #FFFFFF !important;
+}
+
+.st-key-chat_normativo_clear_compacto button {
+    background: #FFFFFF !important;
+    color: #004B35 !important;
+    border: 1px solid #CFE3DA !important;
+}
+
+.st-key-chat_normativo_clear_compacto button:hover {
+    background: #EAF6F0 !important;
+    color: #004B35 !important;
+    border-color: #007A3D !important;
+}
+
+@media (max-width: 768px) {
+    .invap-chat-hero {
+        padding: 15px;
+        border-radius: 18px;
+    }
+
+    .invap-chat-hero-title {
+        font-size: 1.1rem;
+    }
+
+    [data-testid="stChatMessage"] {
+        padding: 0.65rem 0.8rem !important;
+    }
+}
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -2002,26 +2149,51 @@ def render_consultas_normativas():
 
     # Limpieza única de historial visible heredado.
     # La consulta puntual queda como contexto oculto, pero no aparece en el chat.
-    if st.session_state.get("chat_normativo_ui_version") != "chat_contexto_oculto_v4":
+    if st.session_state.get("chat_normativo_ui_version") != "chat_invap_moderno_v5":
         st.session_state["chat_normativo_mensajes"] = []
         st.session_state["chat_normativo_reset_counter"] = st.session_state.get("chat_normativo_reset_counter", 0) + 1
-        st.session_state["chat_normativo_ui_version"] = "chat_contexto_oculto_v4"
+        st.session_state["chat_normativo_ui_version"] = "chat_invap_moderno_v5"
 
     st.markdown("### 2. Chatbot normativo")
-    st.caption(
-        "Use este chat para repreguntas o consultas técnicas. "
-        "La consulta puntual queda disponible como contexto oculto, pero no se muestra como inicio del chat."
+
+    st.markdown(
+        """
+        <div class="invap-chat-hero">
+            <div class="invap-chat-hero-title">Asistente técnico normativo</div>
+            <div class="invap-chat-hero-sub">
+                Use este chat para repreguntas o consultas técnicas sobre inspección, integridad, sistemas de izaje,
+                control de pozo, seguridad operativa y documentación normativa.
+                La consulta puntual queda disponible como contexto oculto, pero no se muestra como inicio del chat.
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True
     )
 
-    # Input arriba para uso práctico en celular
-    st.markdown("#### Nueva consulta al chatbot")
+    st.markdown(
+        f"""
+        <div class="invap-chat-meta">
+            <div class="invap-chat-pill">📚 Base normativa: {len(st.session_state.get("lista_normas", []))} documentos</div>
+            <div class="invap-chat-pill">🟢 Contexto: {"consulta puntual cargada" if st.session_state.get("contexto_ultima_consulta_normativa") else "sin consulta previa"}</div>
+            <div class="invap-chat-pill">🤖 Modo: repreguntas técnicas</div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+    st.markdown('<div class="invap-chat-input-label">Nueva consulta al chatbot</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="invap-chat-input-help">Escriba una pregunta técnica breve o una repregunta sobre la última respuesta normativa.</div>',
+        unsafe_allow_html=True
+    )
 
     chat_input_key = f"chat_normativo_input_{st.session_state.get('chat_normativo_reset_counter', 0)}"
 
     pregunta_chat = st.text_area(
-        "Escriba su consulta técnica",
+        "Consulta técnica",
         value="",
-        height=115,
+        height=92,
+        label_visibility="collapsed",
         placeholder=(
             "Ej.: ¿Por qué no aplicaría ASME B30.30 como norma principal en este caso?\n"
             "Ej.: ¿Cómo llegaste a API RP 9B?"
@@ -2029,14 +2201,27 @@ def render_consultas_normativas():
         key=chat_input_key
     )
 
-    col_chat_send, col_chat_hint = st.columns([1, 2])
-
-    with col_chat_send:
-        enviar_chat = st.button("💬 Enviar consulta", width="stretch")
+    col_chat_hint, col_chat_send = st.columns([6.5, 1.25])
 
     with col_chat_hint:
         if st.session_state.get("contexto_ultima_consulta_normativa"):
-            st.caption("Puede hacer repreguntas sobre la última consulta normativa puntual, aunque no aparezca como mensaje inicial.")
+            st.markdown(
+                """
+                <div class="invap-chat-tip">
+                    💡 Puede hacer repreguntas sobre la última consulta normativa puntual, aunque no aparezca como mensaje inicial.
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+        else:
+            st.caption("También puede iniciar una consulta nueva sin contexto previo.")
+
+    with col_chat_send:
+        enviar_chat = st.button(
+            "Enviar",
+            width="stretch",
+            key="chat_normativo_send_compacto"
+        )
 
     if enviar_chat:
         pregunta_chat_limpia = pregunta_chat.strip()
@@ -2072,36 +2257,42 @@ def render_consultas_normativas():
     st.write("")
 
     st.markdown("#### Conversación técnica")
-    st.caption(f"Base normativa disponible: {len(st.session_state.get('lista_normas', []))} documentos cargados.")
-    if st.session_state.get("contexto_ultima_consulta_normativa"):
-        st.caption("Contexto disponible: última consulta normativa puntual cargada para repreguntas.")
 
     mensajes = st.session_state.get("chat_normativo_mensajes", [])
 
-    with st.container(height=480, border=True):
+    with st.container(height=500, border=False):
         if not mensajes:
             st.markdown(
                 """
-                **Chat listo.**
-
-                Escriba una consulta técnica arriba para iniciar una conversación.
-                También puede hacer repreguntas sobre la última consulta normativa puntual.
-                """
+                <div class="invap-chat-empty">
+                    <strong>Chat listo.</strong><br>
+                    Escriba una consulta técnica arriba para iniciar la conversación.
+                    También puede hacer repreguntas sobre la última consulta normativa puntual.
+                </div>
+                """,
+                unsafe_allow_html=True
             )
         else:
             for msg in mensajes[-20:]:
-                with st.chat_message(msg.get("role", "assistant")):
+                rol = msg.get("role", "assistant")
+                avatar = "👷" if rol == "user" else "🤖"
+                nombre = "user" if rol == "user" else "assistant"
+
+                with st.chat_message(nombre, avatar=avatar):
                     st.markdown(msg.get("content", ""))
 
     st.write("")
-    col_clear_left, col_clear_mid, col_clear_right = st.columns([1, 1.2, 1])
+    col_clear_left, col_clear_mid, col_clear_right = st.columns([2.2, 1.15, 2.2])
 
     with col_clear_mid:
-        if st.button("🗑️ Limpiar chat", width="stretch"):
+        if st.button(
+            "Limpiar chat",
+            width="stretch",
+            key="chat_normativo_clear_compacto"
+        ):
             st.session_state["chat_normativo_mensajes"] = []
             st.session_state["chat_normativo_reset_counter"] = st.session_state.get("chat_normativo_reset_counter", 0) + 1
             st.rerun()
-
 
 def render_anotaciones():
     st.markdown('<div class="big-section-title">🗒️ Anotaciones</div>', unsafe_allow_html=True)
