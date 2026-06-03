@@ -3,6 +3,7 @@ import re
 import json
 import uuid
 import base64
+from pathlib import Path
 import datetime
 import unicodedata
 import textwrap
@@ -11,6 +12,7 @@ from zoneinfo import ZoneInfo
 import streamlit as st
 import streamlit.components.v1 as components
 import pandas as pd
+from PIL import Image
 
 from google.cloud import storage
 from google.oauth2 import service_account
@@ -23,6 +25,8 @@ from engine import InspeccionEngine
 # =========================================================
 BUCKET_NAME = "invap-asistente-normas"
 REGISTROS_PREFIX = "registros_inspecciones"
+MEMORIA_NORMATIVA_PREFIX = "memoria_normativa"
+MEMORIA_NORMATIVA_FILE = f"{MEMORIA_NORMATIVA_PREFIX}/memoria_normativa_validada.json"
 APP_TZ = ZoneInfo("America/Argentina/Buenos_Aires")
 
 LOGO_SIDEBAR_CANDIDATES = [
@@ -219,9 +223,15 @@ MENU_ITEMS = [
 ]
 
 
+favicon_file = Path("assets/favicon_invap_logo1.png")
+if not favicon_file.exists():
+    favicon_file = Path("assets/Logo 1.jpg")
+
+page_icon_invap = Image.open(favicon_file) if favicon_file.exists() else "🟩"
+
 st.set_page_config(
     page_title="INVAP - Sistema Inteligente de Integridad",
-    page_icon="⚙️",
+    page_icon=page_icon_invap,
     layout="wide"
 )
 
@@ -823,6 +833,214 @@ def cargar_registros_inspeccion(creds, project_id):
     return registros
 
 
+
+
+# =========================================================
+# MEMORIA NORMATIVA VALIDADA
+# =========================================================
+def normalizar_memoria_texto(texto):
+    if not texto:
+        return ""
+
+    texto = str(texto)
+    texto = unicodedata.normalize("NFKD", texto)
+    texto = "".join(c for c in texto if not unicodedata.combining(c))
+    texto = texto.lower()
+    texto = re.sub(r"[^a-z0-9áéíóúñü\s\.\-]", " ", texto)
+    texto = re.sub(r"\s+", " ", texto)
+    return texto.strip()
+
+
+def extraer_tokens_memoria(texto):
+    texto_norm = normalizar_memoria_texto(texto)
+
+    stopwords = {
+        "se", "de", "del", "la", "el", "los", "las", "un", "una", "en", "con",
+        "por", "para", "que", "y", "o", "al", "su", "sus", "a", "no",
+        "presenta", "observa", "evidencia", "detecta", "realiza", "durante",
+        "sistema", "equipo", "condicion", "condición", "inspeccion", "inspección",
+        "caso", "norma", "aplica", "aplicar"
+    }
+
+    tokens = []
+    for t in texto_norm.split():
+        if len(t) < 4:
+            continue
+        if t in stopwords:
+            continue
+        tokens.append(t)
+
+    vistos = set()
+    salida = []
+    for t in tokens:
+        if t not in vistos:
+            vistos.add(t)
+            salida.append(t)
+
+    return salida[:30]
+
+
+def cargar_memoria_normativa(creds, project_id):
+    try:
+        client = get_storage_client(creds, project_id)
+        bucket = client.bucket(BUCKET_NAME)
+        blob = bucket.blob(MEMORIA_NORMATIVA_FILE)
+
+        if not blob.exists():
+            return []
+
+        contenido = blob.download_as_text(encoding="utf-8")
+        data = json.loads(contenido)
+
+        if isinstance(data, list):
+            return data
+
+        return []
+    except Exception:
+        return []
+
+
+def guardar_memoria_normativa(creds, project_id, memoria):
+    client = get_storage_client(creds, project_id)
+    bucket = client.bucket(BUCKET_NAME)
+    blob = bucket.blob(MEMORIA_NORMATIVA_FILE)
+
+    blob.upload_from_string(
+        json.dumps(memoria, ensure_ascii=False, indent=2),
+        content_type="application/json"
+    )
+
+    return MEMORIA_NORMATIVA_FILE
+
+
+def buscar_norma_por_nombre_limpio(lista_normas, nombre_norma):
+    if not nombre_norma:
+        return None
+
+    objetivo = normalizar_memoria_texto(nombre_norma).replace(" ", "")
+
+    for norma in lista_normas:
+        base = str(norma).split("/")[-1]
+        base_norm = normalizar_memoria_texto(base).replace(" ", "")
+
+        if base_norm == objetivo:
+            return norma
+
+    objetivo_simple = objetivo.replace(".pdf", "")
+
+    for norma in lista_normas:
+        base = str(norma).split("/")[-1]
+        base_norm = normalizar_memoria_texto(base).replace(" ", "").replace(".pdf", "")
+
+        if objetivo_simple and objetivo_simple in base_norm:
+            return norma
+
+    return None
+
+
+def sugerir_norma_desde_memoria(hallazgo, lista_normas, memoria):
+    if not hallazgo or not memoria:
+        return None, None
+
+    texto_actual = normalizar_memoria_texto(hallazgo)
+    tokens_actuales = set(extraer_tokens_memoria(hallazgo))
+
+    mejor_item = None
+    mejor_score = 0
+
+    for item in memoria:
+        norma_validada = item.get("norma_validada", "")
+        if not norma_validada:
+            continue
+
+        palabras = item.get("palabras_clave", [])
+        if not palabras:
+            palabras = extraer_tokens_memoria(item.get("hallazgo_base", ""))
+
+        palabras_norm = set(normalizar_memoria_texto(p) for p in palabras if p)
+
+        score = 0
+        score += len(tokens_actuales.intersection(palabras_norm)) * 2
+
+        for p in palabras_norm:
+            if p and len(p) >= 4 and p in texto_actual:
+                score += 2
+
+        sistema_item = normalizar_memoria_texto(item.get("sistema_afectado", ""))
+        if sistema_item and sistema_item in texto_actual:
+            score += 1
+
+        if score > mejor_score:
+            mejor_score = score
+            mejor_item = item
+
+    if mejor_item and mejor_score >= 4:
+        norma_resuelta = buscar_norma_por_nombre_limpio(
+            lista_normas,
+            mejor_item.get("norma_validada", "")
+        )
+
+        if norma_resuelta:
+            return norma_resuelta, {
+                "score": mejor_score,
+                "caso": mejor_item
+            }
+
+    return None, None
+
+
+def registrar_aprendizaje_normativo(
+    creds,
+    project_id,
+    hallazgo,
+    norma_detectada,
+    norma_validada,
+    contexto=None,
+    origen="validacion_usuario"
+):
+    memoria = cargar_memoria_normativa(creds, project_id)
+    contexto = contexto or {}
+
+    norma_validada_limpia = nombre_norma_limpio(norma_validada)
+    norma_detectada_limpia = nombre_norma_limpio(norma_detectada)
+
+    item = {
+        "id": f"MEM-{ahora_argentina().strftime('%Y%m%d_%H%M%S')}-{uuid.uuid4().hex[:6].upper()}",
+        "fecha_hora": ahora_argentina().strftime("%Y-%m-%d %H:%M:%S"),
+        "hallazgo_base": hallazgo or "",
+        "palabras_clave": extraer_tokens_memoria(hallazgo),
+        "norma_detectada": norma_detectada_limpia,
+        "norma_validada": norma_validada_limpia,
+        "region": contexto.get("region", ""),
+        "cliente": contexto.get("cliente", ""),
+        "equipo": contexto.get("equipo", ""),
+        "tipo_equipo": contexto.get("tipo_equipo", ""),
+        "sistema_afectado": contexto.get("sistema_afectado", ""),
+        "tipo_inspeccion": contexto.get("tipo_inspeccion", ""),
+        "criticidad": contexto.get("criticidad", ""),
+        "origen": origen,
+        "validado_por_usuario": True
+    }
+
+    firma_nueva = (
+        normalizar_memoria_texto(item["hallazgo_base"])[:120],
+        item["norma_validada"]
+    )
+
+    for existente in memoria:
+        firma_existente = (
+            normalizar_memoria_texto(existente.get("hallazgo_base", ""))[:120],
+            existente.get("norma_validada", "")
+        )
+        if firma_existente == firma_nueva:
+            return False, "Este aprendizaje ya estaba registrado."
+
+    memoria.append(item)
+    guardar_memoria_normativa(creds, project_id, memoria)
+
+    return True, f"Aprendizaje guardado: {norma_validada_limpia}"
+
+
 def registros_a_dataframe(registros):
     columnas = [
         "id_informe",
@@ -1264,6 +1482,9 @@ def init_session_state():
         "norma_actual": None,
         "hallazgo_actual": "",
         "imagenes_actuales": [],
+        "memoria_normativa_aplicada": False,
+        "memoria_normativa_detalle": None,
+        "aprendizaje_normativo_msg": "",
 
         # Consultas Normativas
         "consulta_norma_input": "",
@@ -1271,6 +1492,10 @@ def init_session_state():
         "audio_consulta_procesado": False,
         "chat_normativo_mensajes": [],
         "contexto_ultima_consulta_normativa": {},
+        "consulta_norma_detectada": None,
+        "consulta_memoria_normativa_aplicada": False,
+        "consulta_memoria_normativa_detalle": None,
+        "consulta_aprendizaje_normativo_msg": "",
         "chat_normativo_reset_counter": 0,
         "chat_normativo_ui_version": "",
 
@@ -1331,8 +1556,68 @@ def limpiar_inspeccion_completa():
     st.session_state["hallazgo_actual"] = ""
     st.session_state["imagenes_actuales"] = []
     st.session_state["ruta_ultimo_archivo"] = ""
+    st.session_state["memoria_normativa_aplicada"] = False
+    st.session_state["memoria_normativa_detalle"] = None
+    st.session_state["aprendizaje_normativo_msg"] = ""
 
     incrementar_resets()
+    st.rerun()
+
+
+
+def limpiar_consulta_y_analisis():
+    """
+    Limpia información temporal de todas las pestañas operativas,
+    sin borrar registros archivados ni datos del Dashboard.
+    """
+    # Registro de hallazgo
+    st.session_state["input_hallazgo_usuario"] = ""
+    st.session_state["audio_procesado"] = False
+    st.session_state["ultimo_informe"] = None
+    st.session_state["norma_actual"] = None
+    st.session_state["hallazgo_actual"] = ""
+    st.session_state["imagenes_actuales"] = []
+    st.session_state["ruta_ultimo_archivo"] = ""
+
+    # Consultas Normativas
+    st.session_state["consulta_norma_input"] = ""
+    st.session_state["respuesta_consulta_norma"] = ""
+    st.session_state["audio_consulta_procesado"] = False
+    st.session_state["consulta_norma_detectada"] = None
+    st.session_state["consulta_memoria_normativa_aplicada"] = False
+    st.session_state["consulta_memoria_normativa_detalle"] = None
+    st.session_state["consulta_aprendizaje_normativo_msg"] = ""
+    st.session_state["chat_normativo_mensajes"] = []
+    st.session_state["contexto_ultima_consulta_normativa"] = {}
+    st.session_state["chat_normativo_ui_version"] = ""
+
+    # Anotaciones
+    st.session_state["anotaciones"] = []
+    st.session_state["texto_anotacion"] = ""
+    st.session_state["audio_anotacion_procesado"] = False
+
+    # Corrección FE-44 / QA
+    st.session_state["qa_resultado"] = ""
+
+    # Reset de widgets
+    st.session_state["reset_global_counter"] += 1
+    st.session_state["camara_reset_counter"] += 1
+    st.session_state["upload_reset_counter"] += 1
+    st.session_state["audio_reset_counter"] += 1
+    st.session_state["consulta_upload_reset_counter"] += 1
+    st.session_state["consulta_audio_reset_counter"] += 1
+    st.session_state["consulta_reset_counter"] += 1
+    st.session_state["anotacion_reset_counter"] += 1
+    st.session_state["qa_reset_counter"] += 1
+    st.session_state["chat_normativo_reset_counter"] = st.session_state.get("chat_normativo_reset_counter", 0) + 1
+
+    # Cámara normativa si existe
+    if "consulta_usar_camara_normativa" in st.session_state:
+        st.session_state["consulta_usar_camara_normativa"] = False
+    if "consulta_camara_reset_counter" in st.session_state:
+        st.session_state["consulta_camara_reset_counter"] += 1
+
+    st.session_state["sync_msg"] = "Consulta y análisis limpiados correctamente."
     st.rerun()
 
 
@@ -1340,6 +1625,10 @@ def limpiar_consulta_normativa():
     st.session_state["consulta_norma_input"] = ""
     st.session_state["respuesta_consulta_norma"] = ""
     st.session_state["audio_consulta_procesado"] = False
+    st.session_state["consulta_norma_detectada"] = None
+    st.session_state["consulta_memoria_normativa_aplicada"] = False
+    st.session_state["consulta_memoria_normativa_detalle"] = None
+    st.session_state["consulta_aprendizaje_normativo_msg"] = ""
 
     st.session_state["consulta_upload_reset_counter"] += 1
     st.session_state["consulta_audio_reset_counter"] += 1
@@ -1631,6 +1920,42 @@ def render_dashboard(df):
 
 
 def render_registro_hallazgo(creds, project_id):
+    st.markdown("""
+    <style>
+    /* Ajustes específicos para Registro de hallazgo */
+
+    /* Textarea de descripción técnica más compacto */
+    div[data-testid="stVerticalBlock"]:has(textarea[aria-label="Descripción técnica"]) textarea {
+        min-height: 150px !important;
+    }
+
+    /* Botones principales de generación más compactos */
+    div[data-testid="stVerticalBlock"]:has(textarea[aria-label="Descripción técnica"]) .stButton > button {
+        min-height: 50px !important;
+        height: 50px !important;
+        font-size: 0.95rem !important;
+        padding: 0.45rem 0.85rem !important;
+        border-radius: 14px !important;
+    }
+
+    /* Caja de cámara apagada más compacta */
+    .camera-off-box {
+        padding: 0.85rem 1rem !important;
+        min-height: 72px !important;
+        display: flex !important;
+        align-items: center !important;
+    }
+
+    /* Upload de evidencia visual más compacto */
+    section[data-testid="stFileUploaderDropzone"] {
+        min-height: 96px !important;
+        padding-top: 0.55rem !important;
+        padding-bottom: 0.55rem !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    st.markdown('<div class="big-section-title">🛠️ Registro de hallazgo</div>', unsafe_allow_html=True)
     st.markdown('<div class="big-section-title">📝 Registro de hallazgo</div>', unsafe_allow_html=True)
     st.caption("Carga de datos de inspección, registro técnico, generación de informe asistido por IA y archivo para Dashboard.")
 
@@ -1762,9 +2087,10 @@ def render_registro_hallazgo(creds, project_id):
         hallazgo = st.text_area(
             "Descripción técnica",
             value=st.session_state.get("input_hallazgo_usuario", ""),
-            height=190,
+            height=160,
             placeholder="Ej.: Se observa eslinga con alambres cortados en ojal...",
-            key=hallazgo_key
+            key=hallazgo_key,
+            label_visibility="collapsed"
         )
 
         st.session_state["input_hallazgo_usuario"] = hallazgo
@@ -1803,7 +2129,8 @@ def render_registro_hallazgo(creds, project_id):
             "O cargar imagen",
             type=["jpg", "jpeg", "png"],
             accept_multiple_files=True,
-            key=up_key
+            key=up_key,
+            label_visibility="collapsed"
         )
 
     lista_imgs_motor = []
@@ -1827,7 +2154,7 @@ def render_registro_hallazgo(creds, project_id):
     st.write("")
     st.markdown("### 4. Generación del informe")
 
-    col_gen1, col_gen2 = st.columns([1, 1])
+    col_gen_spacer1, col_gen1, col_gen2, col_gen_spacer2 = st.columns([0.18, 1, 1, 0.18])
 
     with col_gen1:
         if st.button("🧠 Generar informe con IA", width="stretch"):
@@ -1836,11 +2163,25 @@ def render_registro_hallazgo(creds, project_id):
             else:
                 try:
                     with st.spinner("Analizando hallazgo..."):
-                        norma = st.session_state["motor"].clasificar_norma_ia(
+                        memoria_normativa = cargar_memoria_normativa(creds, project_id)
+                        norma_memoria, detalle_memoria = sugerir_norma_desde_memoria(
                             hallazgo,
                             st.session_state["lista_normas"],
-                            lista_imgs_motor
+                            memoria_normativa
                         )
+
+                        if norma_memoria:
+                            norma = norma_memoria
+                            st.session_state["memoria_normativa_aplicada"] = True
+                            st.session_state["memoria_normativa_detalle"] = detalle_memoria
+                        else:
+                            norma = st.session_state["motor"].clasificar_norma_ia(
+                                hallazgo,
+                                st.session_state["lista_normas"],
+                                lista_imgs_motor
+                            )
+                            st.session_state["memoria_normativa_aplicada"] = False
+                            st.session_state["memoria_normativa_detalle"] = None
 
                         res, ref = st.session_state["motor"].consultar_normativa_rag(
                             norma,
@@ -1884,6 +2225,13 @@ def render_registro_hallazgo(creds, project_id):
             f"**Tipo de inspección:** {contexto.get('tipo_inspeccion', '')} | "
             f"**Criticidad:** {contexto.get('criticidad', '')}"
         )
+
+        if st.session_state.get("memoria_normativa_aplicada"):
+            detalle_mem = st.session_state.get("memoria_normativa_detalle") or {}
+            st.caption(
+                f"🧠 Norma priorizada por memoria validada. "
+                f"Coincidencia técnica: {detalle_mem.get('score', 'N/D')}"
+            )
 
         st.markdown(st.session_state["ultimo_informe"])
         st.write("---")
@@ -1986,21 +2334,26 @@ def render_registro_hallazgo(creds, project_id):
 
 
 def render_consultas_normativas():
-    st.markdown('<div class="big-section-title">📚 Consultas Normativas</div>', unsafe_allow_html=True)
-    st.caption(
-        "Consulta normativa asistida por IA sobre la base documental cargada en el bucket. "
-        "Puede realizar una consulta puntual o continuar el análisis mediante el chatbot normativo."
-    )
+    st.markdown("""
+    <style>
+    /* Botones más compactos en Consulta Normativa */
+    div[data-testid="stVerticalBlock"]:has(textarea[aria-label="Escriba o revise su consulta"]) .stButton > button {
+        min-height: 50px !important;
+        height: 50px !important;
+        font-size: 0.95rem !important;
+        padding: 0.45rem 0.85rem !important;
+        border-radius: 14px !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
 
+    st.markdown('<div class="big-section-title">📚 Consultas Normativas</div>', unsafe_allow_html=True)
+    st.write("")
     # =========================================================
     # BLOQUE 1 - CONSULTA PUNTUAL
     # =========================================================
     st.markdown("### 1. Consulta puntual normativa")
-    st.write(
-        "Use este bloque cuando necesite consultar una norma, un criterio técnico o un caso específico "
-        "a partir de texto, audio o evidencia visual."
-    )
-
+    st.write("")
     with st.expander("🎙️ Entrada por audio e imagen opcional", expanded=False):
         col_audio, col_img = st.columns([1, 1])
 
@@ -2097,7 +2450,7 @@ def render_consultas_normativas():
 
     st.session_state["consulta_norma_input"] = pregunta
 
-    col_cons_1, col_cons_2 = st.columns([1, 1])
+    col_cons_spacer1, col_cons_1, col_cons_2, col_cons_spacer2 = st.columns([0.18, 1, 1, 0.18])
 
     with col_cons_1:
         if st.button("📚 Consultar normativa", width="stretch"):
@@ -2108,19 +2461,57 @@ def render_consultas_normativas():
 
                 try:
                     with st.spinner("Consultando base normativa..."):
-                        respuesta = st.session_state["motor"].consultar_normas_chat(
-                            pregunta=pregunta,
-                            lista_normas=st.session_state["lista_normas"],
-                            lista_imagenes=lista_imgs_consulta
+                        memoria_normativa = cargar_memoria_normativa(creds, project_id)
+                        norma_memoria, detalle_memoria = sugerir_norma_desde_memoria(
+                            pregunta,
+                            st.session_state["lista_normas"],
+                            memoria_normativa
                         )
 
+                        if norma_memoria:
+                            respuesta, ref_norma = st.session_state["motor"].consultar_normativa_rag(
+                                norma_memoria,
+                                pregunta,
+                                lista_imgs_consulta
+                            )
+
+                            st.session_state["consulta_norma_detectada"] = ref_norma or norma_memoria
+                            st.session_state["consulta_memoria_normativa_aplicada"] = True
+                            st.session_state["consulta_memoria_normativa_detalle"] = detalle_memoria
+
+                        else:
+                            respuesta = st.session_state["motor"].consultar_normas_chat(
+                                pregunta=pregunta,
+                                lista_normas=st.session_state["lista_normas"],
+                                lista_imagenes=lista_imgs_consulta
+                            )
+
+                            st.session_state["consulta_norma_detectada"] = None
+                            st.session_state["consulta_memoria_normativa_aplicada"] = False
+                            st.session_state["consulta_memoria_normativa_detalle"] = None
+
                         st.session_state["respuesta_consulta_norma"] = respuesta
+
+                        # consulta_norma_detectada_auto_fix_v1
+                        # Si la consulta no vino desde memoria validada, igual intentamos
+                        # determinar una norma principal para poder confirmar aprendizaje.
+                        if not st.session_state.get("consulta_norma_detectada"):
+                            try:
+                                norma_auto_consulta = st.session_state["motor"].clasificar_norma_ia(
+                                    pregunta,
+                                    st.session_state["lista_normas"],
+                                    lista_imgs_consulta
+                                )
+                                st.session_state["consulta_norma_detectada"] = norma_auto_consulta
+                            except Exception:
+                                st.session_state["consulta_norma_detectada"] = None
 
                         # Contexto oculto para el chatbot normativo.
                         # No se muestra como mensaje inicial, pero permite repreguntas sobre la última consulta puntual.
                         st.session_state["contexto_ultima_consulta_normativa"] = {
                             "pregunta": pregunta.strip(),
-                            "respuesta": respuesta
+                            "respuesta": respuesta,
+                            "norma_detectada": nombre_norma_limpio(st.session_state.get("consulta_norma_detectada"))
                         }
 
                 except Exception as e:
@@ -2133,7 +2524,132 @@ def render_consultas_normativas():
     if st.session_state.get("respuesta_consulta_norma"):
         st.write("")
         st.markdown("#### Respuesta de consulta puntual")
+
+        norma_sistema = nombre_norma_limpio(st.session_state.get("consulta_norma_detectada"))
+        if norma_sistema and norma_sistema != "No determinada":
+            st.info(f"**Norma detectada por el sistema:** {norma_sistema}")
+
         st.markdown(st.session_state["respuesta_consulta_norma"])
+
+        st.markdown('<div class="memoria-normativa-title">🧠 Memoria normativa</div>', unsafe_allow_html=True)
+        st.markdown('<div class="memoria-normativa-help">Validación opcional para mejorar futuras clasificaciones.</div>', unsafe_allow_html=True)
+
+
+        st.markdown("""
+        <style>
+        /* Memoria normativa compacta */
+        .memoria-normativa-title {
+            font-size: 1rem !important;
+            font-weight: 850 !important;
+            color: #0F241C !important;
+            margin-top: 0.65rem !important;
+            margin-bottom: 0.1rem !important;
+        }
+
+        .memoria-normativa-help {
+            font-size: 0.82rem !important;
+            color: #60756D !important;
+            margin-bottom: 0.35rem !important;
+        }
+
+        .st-key-btn_confirmar_norma_consulta button,
+        .st-key-btn_guardar_correccion_consulta button {
+            min-height: 40px !important;
+            height: 40px !important;
+            font-size: 0.84rem !important;
+            padding: 0.30rem 0.55rem !important;
+            border-radius: 11px !important;
+            box-shadow: 0 3px 8px rgba(0, 75, 53, 0.12) !important;
+        }
+
+        div[data-testid="stSelectbox"] div[data-baseweb="select"] > div {
+            min-height: 40px !important;
+            height: 40px !important;
+            font-size: 0.88rem !important;
+            border-radius: 11px !important;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+
+        col_apr_sp1, col_cons_apr_1, col_cons_apr_2, col_cons_apr_3, col_apr_sp2 = st.columns([0.18, 0.72, 1.15, 0.72, 0.18])
+
+        with col_cons_apr_1:
+            if st.button("✅ Confirmar norma", width="stretch", key="btn_confirmar_norma_consulta"):
+                norma_consulta = st.session_state.get("consulta_norma_detectada")
+
+                # Si por algún motivo todavía no hay norma guardada, se intenta resolver
+                # automáticamente con el mismo motor de clasificación normativa.
+                if not norma_consulta:
+                    try:
+                        memoria_normativa = cargar_memoria_normativa(creds, project_id)
+                        norma_memoria, _ = sugerir_norma_desde_memoria(
+                            st.session_state.get("consulta_norma_input", ""),
+                            st.session_state.get("lista_normas", []),
+                            memoria_normativa
+                        )
+
+                        if norma_memoria:
+                            norma_consulta = norma_memoria
+                        else:
+                            norma_consulta = st.session_state["motor"].clasificar_norma_ia(
+                                st.session_state.get("consulta_norma_input", ""),
+                                st.session_state.get("lista_normas", []),
+                                []
+                            )
+
+                        st.session_state["consulta_norma_detectada"] = norma_consulta
+
+                    except Exception:
+                        norma_consulta = None
+
+                if not norma_consulta:
+                    st.warning("No se pudo determinar una norma automática para confirmar. Use la corrección normativa.")
+                else:
+                    guardado, msg = registrar_aprendizaje_normativo(
+                        creds=creds,
+                        project_id=project_id,
+                        hallazgo=st.session_state.get("consulta_norma_input", ""),
+                        norma_detectada=norma_consulta,
+                        norma_validada=norma_consulta,
+                        contexto={"origen_funcional": "Consultas Normativas"},
+                        origen="confirmacion_consulta_normativa"
+                    )
+                    st.session_state["consulta_aprendizaje_normativo_msg"] = msg
+                    st.rerun()
+
+        with col_cons_apr_2:
+            opciones_norma_consulta = sorted([nombre_norma_limpio(n) for n in st.session_state.get("lista_normas", [])])
+            norma_corregida_consulta = st.selectbox(
+                "Corregir norma de consulta",
+                ["Seleccionar norma correcta..."] + opciones_norma_consulta,
+                key="select_norma_corregida_consulta",
+                label_visibility="collapsed"
+            )
+
+        with col_cons_apr_3:
+            if st.button("💾 Guardar corrección", width="stretch", key="btn_guardar_correccion_consulta"):
+                if norma_corregida_consulta == "Seleccionar norma correcta...":
+                    st.warning("Seleccione una norma correcta antes de guardar.")
+                else:
+                    norma_corregida_path = buscar_norma_por_nombre_limpio(
+                        st.session_state.get("lista_normas", []),
+                        norma_corregida_consulta
+                    )
+
+                    guardado, msg = registrar_aprendizaje_normativo(
+                        creds=creds,
+                        project_id=project_id,
+                        hallazgo=st.session_state.get("consulta_norma_input", ""),
+                        norma_detectada=st.session_state.get("consulta_norma_detectada"),
+                        norma_validada=norma_corregida_path or norma_corregida_consulta,
+                        contexto={"origen_funcional": "Consultas Normativas"},
+                        origen="correccion_consulta_normativa"
+                    )
+                    st.session_state["consulta_aprendizaje_normativo_msg"] = msg
+                    st.rerun()
+
+        if st.session_state.get("consulta_aprendizaje_normativo_msg"):
+            st.caption(f"✅ {st.session_state['consulta_aprendizaje_normativo_msg']}")
 
         generar_descarga_txt(
             nombre_base="Consulta_Normativa",
@@ -2155,38 +2671,9 @@ def render_consultas_normativas():
         st.session_state["chat_normativo_ui_version"] = "chat_invap_moderno_v5"
 
     st.markdown("### 2. Chatbot normativo")
-
-    st.markdown(
-        """
-        <div class="invap-chat-hero">
-            <div class="invap-chat-hero-title">Asistente técnico normativo</div>
-            <div class="invap-chat-hero-sub">
-                Use este chat para repreguntas o consultas técnicas sobre inspección, integridad, sistemas de izaje,
-                control de pozo, seguridad operativa y documentación normativa.
-                La consulta puntual queda disponible como contexto oculto, pero no se muestra como inicio del chat.
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-    st.markdown(
-        f"""
-        <div class="invap-chat-meta">
-            <div class="invap-chat-pill">📚 Base normativa: {len(st.session_state.get("lista_normas", []))} documentos</div>
-            <div class="invap-chat-pill">🟢 Contexto: {"consulta puntual cargada" if st.session_state.get("contexto_ultima_consulta_normativa") else "sin consulta previa"}</div>
-            <div class="invap-chat-pill">🤖 Modo: repreguntas técnicas</div>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-    st.markdown('<div class="invap-chat-input-label">Nueva consulta al chatbot</div>', unsafe_allow_html=True)
-    st.markdown(
-        '<div class="invap-chat-input-help">Escriba una pregunta técnica breve o una repregunta sobre la última respuesta normativa.</div>',
-        unsafe_allow_html=True
-    )
-
+    st.write("")
+    st.write("")
+    st.write("")
     chat_input_key = f"chat_normativo_input_{st.session_state.get('chat_normativo_reset_counter', 0)}"
 
     pregunta_chat = st.text_area(
@@ -2194,27 +2681,10 @@ def render_consultas_normativas():
         value="",
         height=92,
         label_visibility="collapsed",
-        placeholder=(
-            "Ej.: ¿Por qué no aplicaría ASME B30.30 como norma principal en este caso?\n"
-            "Ej.: ¿Cómo llegaste a API RP 9B?"
-        ),
+        placeholder="Escriba una consulta o repregunta técnica..." ,
         key=chat_input_key
     )
-
-    col_chat_hint, col_chat_send = st.columns([6.5, 1.25])
-
-    with col_chat_hint:
-        if st.session_state.get("contexto_ultima_consulta_normativa"):
-            st.markdown(
-                """
-                <div class="invap-chat-tip">
-                    💡 Puede hacer repreguntas sobre la última consulta normativa puntual, aunque no aparezca como mensaje inicial.
-                </div>
-                """,
-                unsafe_allow_html=True
-            )
-        else:
-            st.caption("También puede iniciar una consulta nueva sin contexto previo.")
+    col_chat_spacer, col_chat_send = st.columns([6.5, 1.25])
 
     with col_chat_send:
         enviar_chat = st.button(
@@ -2266,8 +2736,7 @@ def render_consultas_normativas():
                 """
                 <div class="invap-chat-empty">
                     <strong>Chat listo.</strong><br>
-                    Escriba una consulta técnica arriba para iniciar la conversación.
-                    También puede hacer repreguntas sobre la última consulta normativa puntual.
+                    Escriba una consulta técnica para iniciar la conversación.
                 </div>
                 """,
                 unsafe_allow_html=True
@@ -2295,6 +2764,28 @@ def render_consultas_normativas():
             st.rerun()
 
 def render_anotaciones():
+    st.markdown("""
+    <style>
+    /* Ajustes específicos para la sección Anotaciones */
+    div[data-testid="stVerticalBlock"]:has(textarea[aria-label="Nueva anotación"]) textarea {
+        min-height: 132px !important;
+    }
+
+    div[data-testid="stVerticalBlock"]:has(textarea[aria-label="Nueva anotación"]) .stButton > button {
+        min-height: 48px !important;
+        height: 48px !important;
+        font-size: 0.92rem !important;
+        padding: 0.45rem 0.75rem !important;
+        border-radius: 14px !important;
+    }
+
+    div[data-testid="stVerticalBlock"]:has(textarea[aria-label="Nueva anotación"]) [data-testid="column"] {
+        padding-left: 0.25rem !important;
+        padding-right: 0.25rem !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
     st.markdown('<div class="big-section-title">🗒️ Anotaciones</div>', unsafe_allow_html=True)
     st.caption("Puede guardar múltiples anotaciones y descargarlas cuando quiera en formato Markdown.")
 
@@ -2337,12 +2828,13 @@ def render_anotaciones():
             value=st.session_state.get("texto_anotacion", ""),
             height=170,
             placeholder="Escriba aquí observaciones, pendientes, ideas o notas de campo...",
-            key=nota_key
+            key=nota_key,
+            label_visibility="collapsed"
         )
 
         st.session_state["texto_anotacion"] = nueva_nota
 
-        col_note_1, col_note_2, col_note_3 = st.columns([1, 1, 1])
+        col_note_1, col_note_2, col_note_3 = st.columns([0.9, 0.9, 0.9])
 
         with col_note_1:
             if st.button("➕ Agregar anotación", width="stretch"):
@@ -2401,6 +2893,27 @@ def render_anotaciones():
 
 
 def render_qa():
+    st.markdown("""
+    <style>
+    /* Ajustes específicos para Corrección de informes FE-44 / QA */
+    div[data-testid="stVerticalBlock"]:has(textarea[aria-label="O pegar texto del informe manualmente"]) textarea {
+        min-height: 150px !important;
+    }
+
+    div[data-testid="stVerticalBlock"]:has(textarea[aria-label="Instrucción específica para este informe"]) textarea {
+        min-height: 120px !important;
+    }
+
+    div[data-testid="stVerticalBlock"]:has(textarea[aria-label="Instrucción específica para este informe"]) .stButton > button {
+        min-height: 50px !important;
+        height: 50px !important;
+        font-size: 0.95rem !important;
+        padding: 0.45rem 0.85rem !important;
+        border-radius: 14px !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
     st.markdown('<div class="big-section-title">✍️ Corrección de informes FE-44 / QA</div>', unsafe_allow_html=True)
 
     st.subheader("Agente corrector de informes técnicos")
@@ -2430,8 +2943,9 @@ def render_qa():
     texto_manual = st.text_area(
         "O pegar texto del informe manualmente",
         value="",
-        height=180,
-        placeholder="Pegue aquí el texto del informe si no desea subir un archivo..."
+        height=150,
+        placeholder="Pegue aquí el texto del informe si no desea subir un archivo...",
+        label_visibility="collapsed"
     )
 
     prompt_qa = st.text_area(
@@ -2440,10 +2954,16 @@ def render_qa():
             "Indicar qué aspecto específico querés revisar. Por ejemplo: validar formato FE-44, consistencia técnica, redacción formal, "
             "ortografía, datos faltantes y coherencia entre introducción, desarrollo y conclusión."
         ),
-        height=120
+        height=115,
+        label_visibility="collapsed"
     )
 
-    if st.button("✍️ Analizar / corregir informe", width="stretch"):
+    col_qa_spacer1, col_qa_btn, col_qa_spacer2 = st.columns([0.18, 1, 0.18])
+
+    with col_qa_btn:
+        analizar_qa = st.button("✍️ Analizar / corregir informe", width="stretch")
+
+    if analizar_qa:
         if not archivo_qa and not texto_manual.strip():
             st.warning("Suba un PDF/DOCX o pegue texto del informe para analizar.")
         else:
@@ -2816,16 +3336,9 @@ with st.sidebar:
 
     st.write("---")
 
-    if st.button("🔄 Sincronizar normas y datos", width="stretch"):
-        try:
-            st.session_state["lista_normas"] = cargar_lista_normas(creds, project_id)
-            st.session_state["sync_msg"] = (
-                f"Sincronización completa. Normas disponibles: "
-                f"{len(st.session_state['lista_normas'])}"
-            )
-        except Exception as e:
-            st.session_state["sync_msg"] = f"No se pudo sincronizar: {e}"
-        st.rerun()
+
+    if st.button("🧹 Limpiar consulta y análisis", width="stretch"):
+        limpiar_consulta_y_analisis()
 
     if st.session_state.get("sync_msg"):
         st.success(st.session_state["sync_msg"])
@@ -2834,16 +3347,17 @@ with st.sidebar:
 # =========================================================
 # CABECERA
 # =========================================================
-st.markdown("""
-<div class="invap-header-card">
-    <div class="invap-header-title">
-        Sistema Inteligente de Gestión de Integridad
+if st.session_state["menu_principal"] == "Dashboard operativo":
+    st.markdown("""
+    <div class="invap-header-card">
+        <div class="invap-header-title">
+            Sistema Inteligente de Gestión de Integridad
+        </div>
+        <div class="invap-header-subtitle">
+            Asistente de Inspección | Hallazgos técnicos, consulta normativa, trazabilidad documental y QA de informes
+        </div>
     </div>
-    <div class="invap-header-subtitle">
-        Asistente de Inspección | Hallazgos técnicos, consulta normativa, trazabilidad documental y QA de informes
-    </div>
-</div>
-""", unsafe_allow_html=True)
+    """, unsafe_allow_html=True)
 
 
 # =========================================================
