@@ -901,16 +901,41 @@ def cargar_memoria_normativa(creds, project_id):
 
 
 def guardar_memoria_normativa(creds, project_id, memoria):
-    client = get_storage_client(creds, project_id)
-    bucket = client.bucket(BUCKET_NAME)
-    blob = bucket.blob(MEMORIA_NORMATIVA_FILE)
+    """
+    Guarda la memoria normativa validada por el usuario en Google Cloud Storage.
 
-    blob.upload_from_string(
-        json.dumps(memoria, ensure_ascii=False, indent=2),
-        content_type="application/json"
-    )
+    Importante:
+    - Si la service account no tiene permisos de escritura sobre el bucket,
+      Google Cloud puede devolver Forbidden / 403.
+    - En ese caso no se debe romper toda la app: se informa el problema
+      para poder seguir usando Consultas Normativas.
+    """
+    try:
+        client = get_storage_client(creds, project_id)
+        bucket = client.bucket(BUCKET_NAME)
+        blob = bucket.blob(MEMORIA_NORMATIVA_FILE)
 
-    return MEMORIA_NORMATIVA_FILE
+        blob.upload_from_string(
+            json.dumps(memoria, ensure_ascii=False, indent=2),
+            content_type="application/json"
+        )
+
+        return True, MEMORIA_NORMATIVA_FILE
+
+    except Exception as e:
+        msg_error = str(e)
+
+        if "403" in msg_error or "Forbidden" in msg_error:
+            return (
+                False,
+                "No se pudo guardar la memoria normativa: la cuenta de servicio "
+                "no tiene permisos de escritura sobre el bucket de Google Cloud Storage."
+            )
+
+        return (
+            False,
+            f"No se pudo guardar la memoria normativa: {type(e).__name__}"
+        )
 
 
 def buscar_norma_por_nombre_limpio(lista_normas, nombre_norma):
@@ -1036,7 +1061,11 @@ def registrar_aprendizaje_normativo(
             return False, "Este aprendizaje ya estaba registrado."
 
     memoria.append(item)
-    guardar_memoria_normativa(creds, project_id, memoria)
+
+    guardado_ok, mensaje_guardado = guardar_memoria_normativa(creds, project_id, memoria)
+
+    if not guardado_ok:
+        return False, mensaje_guardado
 
     return True, f"Aprendizaje guardado: {norma_validada_limpia}"
 
@@ -2649,7 +2678,14 @@ def render_consultas_normativas():
                     st.rerun()
 
         if st.session_state.get("consulta_aprendizaje_normativo_msg"):
-            st.caption(f"✅ {st.session_state['consulta_aprendizaje_normativo_msg']}")
+            msg_aprendizaje = st.session_state["consulta_aprendizaje_normativo_msg"]
+
+            if str(msg_aprendizaje).startswith("No se pudo guardar"):
+                st.warning(msg_aprendizaje)
+            elif str(msg_aprendizaje).startswith("Este aprendizaje ya estaba registrado"):
+                st.info(msg_aprendizaje)
+            else:
+                st.caption(f"✅ {msg_aprendizaje}")
 
         generar_descarga_txt(
             nombre_base="Consulta_Normativa",
