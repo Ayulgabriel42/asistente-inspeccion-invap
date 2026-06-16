@@ -2559,6 +2559,18 @@ def render_consultas_normativas():
             st.info(f"**Norma detectada por el sistema:** {norma_sistema}")
 
         st.markdown(st.session_state["respuesta_consulta_norma"])
+        
+        fecha_consulta = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
+        contenido_descarga = (
+            "CONSULTA NORMATIVA - INVAP\n"
+            f"Fecha: {fecha_consulta}\n"
+            "==================================================\n\n"
+            "CONSULTA:\n"
+            f"{st.session_state.get('consulta_norma_input', '').strip()}\n\n"
+            "--------------------------------------------------\n\n"
+            "RESPUESTA:\n"
+            f"{st.session_state['respuesta_consulta_norma'].strip()}\n"
+        )
 
         st.markdown('<div class="memoria-normativa-title">🧠 Memoria normativa</div>', unsafe_allow_html=True)
         st.markdown('<div class="memoria-normativa-help">Validación opcional para mejorar futuras clasificaciones.</div>', unsafe_allow_html=True)
@@ -2689,7 +2701,7 @@ def render_consultas_normativas():
 
         generar_descarga_txt(
             nombre_base="Consulta_Normativa",
-            contenido=st.session_state["respuesta_consulta_norma"],
+            contenido=contenido_descarga,
             label="💾 Descargar respuesta"
         )
 
