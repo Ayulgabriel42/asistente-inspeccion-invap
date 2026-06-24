@@ -2558,6 +2558,56 @@ def render_consultas_normativas():
         if norma_sistema and norma_sistema != "No determinada":
             st.info(f"**Norma detectada por el sistema:** {norma_sistema}")
 
+            # Verificación de vigencia en línea
+            cache_key = f"vigencia_{norma_sistema}"
+            if cache_key not in st.session_state:
+                with st.spinner("Verificando vigencia de la norma en línea..."):
+                    st.session_state[cache_key] = st.session_state["motor"].verificar_vigencia_norma(norma_sistema)
+
+            vigencia = st.session_state.get(cache_key)
+            if vigencia:
+                estado = vigencia.get("estado", "NO DETERMINADO")
+                ultima = vigencia.get("ultima_actualizacion")
+                reemplazada = vigencia.get("reemplazada_por")
+                detalle = vigencia.get("detalle", "")
+
+                if estado == "VIGENTE":
+                    badge_color = "#16a34a"
+                    badge_icon = "✅"
+                    badge_texto = f"Norma VIGENTE"
+                    if ultima:
+                        badge_texto += f" — Última actualización: {ultima}"
+                elif estado in ("REVISADA", "REEMPLAZADA"):
+                    badge_color = "#d97706"
+                    badge_icon = "⚠️"
+                    badge_texto = f"Norma {estado}"
+                    if reemplazada:
+                        badge_texto += f" — Reemplazada por: {reemplazada}"
+                    elif ultima:
+                        badge_texto += f" — Última edición detectada: {ultima}"
+                else:
+                    badge_color = "#6b7280"
+                    badge_icon = "ℹ️"
+                    badge_texto = "Vigencia no determinada"
+
+                st.markdown(
+                    f"""<div style="
+                        display:inline-block;
+                        background:{badge_color}18;
+                        border:1px solid {badge_color};
+                        border-radius:8px;
+                        padding:6px 14px;
+                        margin-bottom:10px;
+                        font-size:0.9em;
+                        color:{badge_color};
+                        font-weight:600;
+                    ">{badge_icon} {badge_texto}</div>
+                    <div style="font-size:0.78em;color:#6b7280;margin-bottom:8px;margin-top:2px;">
+                        {detalle} &nbsp;·&nbsp; Verificado vía búsqueda web — {datetime.datetime.now().strftime("%d/%m/%Y")}
+                    </div>""",
+                    unsafe_allow_html=True
+                )
+
         st.markdown(st.session_state["respuesta_consulta_norma"])
         
         fecha_consulta = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")

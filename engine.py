@@ -2421,3 +2421,58 @@ class InspeccionEngine:
         )
 
         return res.text
+
+    # =========================================================
+    # VERIFICACIÓN DE VIGENCIA DE NORMA (Google Search Grounding)
+    # =========================================================
+    def verificar_vigencia_norma(self, codigo_norma):
+        """
+        Consulta a Gemini con Google Search para determinar si una norma está vigente
+        y cuál es su última edición/actualización conocida.
+        Retorna un dict con: estado, ultima_actualizacion, detalle, reemplazada_por.
+        """
+        if not codigo_norma:
+            return None
+
+        nombre_limpio = str(codigo_norma).split("/")[-1].replace(".pdf", "").strip()
+
+        prompt = (
+            f"Busca información actualizada sobre la norma técnica: {nombre_limpio}\n\n"
+            "Necesito saber:\n"
+            "1. Si la norma está VIGENTE o fue REEMPLAZADA/REVISADA\n"
+            "2. El año o fecha de la última edición publicada\n"
+            "3. Si fue reemplazada, por cuál norma\n\n"
+            "Responde ÚNICAMENTE en este formato JSON sin markdown:\n"
+            "{\n"
+            '  "estado": "VIGENTE" o "REVISADA" o "REEMPLAZADA" o "NO DETERMINADO",\n'
+            '  "ultima_actualizacion": "año o fecha, ej: 2022 o 2022-01",\n'
+            '  "reemplazada_por": "nombre de la norma que la reemplaza o null",\n'
+            '  "detalle": "una línea explicativa breve"\n'
+            "}"
+        )
+
+        try:
+            search_tool = types.Tool(google_search=types.GoogleSearch())
+            response = self.client.models.generate_content(
+                model=self.model_id,
+                contents=prompt,
+                config=types.GenerateContentConfig(tools=[search_tool])
+            )
+
+            texto = response.text.strip()
+            if texto.startswith("```"):
+                texto = re.sub(r"^```[a-z]*\n?", "", texto)
+                texto = re.sub(r"\n?```$", "", texto)
+
+            resultado = json.loads(texto)
+            resultado["norma"] = nombre_limpio
+            return resultado
+
+        except Exception:
+            return {
+                "norma": nombre_limpio,
+                "estado": "NO DETERMINADO",
+                "ultima_actualizacion": None,
+                "reemplazada_por": None,
+                "detalle": "No se pudo verificar la vigencia en línea."
+            }
