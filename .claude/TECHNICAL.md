@@ -1,6 +1,6 @@
 # Asistente de Inspección INVAP — Documentación Técnica y Funcional
 
-**Última actualización:** 2026-06-24  
+**Última actualización:** 2026-06-26  
 **Repo:** `Ayulgabriel42/asistente-inspeccion-invap` (rama `main`)  
 **Desplegado en:** Streamlit Cloud — `/mount/src/asistente-inspeccion-invap/`
 
@@ -106,11 +106,24 @@ Sección principal de consulta a normas. Flujo:
 ---
 
 ### 3. Anotaciones
-- Entrada por **audio** (micrófono o archivo) → transcripción con Gemini
+- Entrada por **audio** (micrófono) → transcripción con Gemini
 - Entrada **manual** por texto
-- Lista de anotaciones de sesión, descargable en Markdown
+- Entrada por **fotografía** — cámara con toggle (apagada por defecto), igual al patrón del resto de la app
+- Cada anotación agrupa: texto + fotos capturadas en el momento
+- Fotos pendientes se acumulan en `fotos_temp` y se previsual izan como miniaturas antes de guardar
+- Al guardar, la foto activa en cámara se incluye automáticamente (sin requerir paso intermedio)
+- **Descargas:**
+  - **Todo (ZIP)** — `anotaciones.md` + carpetas `fotos/nota_N/foto_X.ext`
+  - **Solo texto (MD)** — markdown con mención de fotos adjuntas
+  - **Solo fotos (ZIP)** — organizado por nota; deshabilitado si no hay fotos
+- Historial muestra texto + thumbnails de fotos con descarga individual por foto
 
 **Función:** `render_anotaciones()`
+
+**Session state relevante:**
+- `anotaciones` — lista de `{fecha, texto, fotos: [{nombre, bytes, mime}]}`
+- `fotos_temp` — fotos capturadas aún no guardadas en una anotación
+- `foto_reset_counter` — controla las keys de cámara y toggle
 
 ---
 
@@ -211,7 +224,7 @@ REGIONES = ["Comodoro Rivadavia", "Neuquén", "Bariloche", "Otra"]
 - `analizar_docx_qa(docx_bytes, prompt_p)` — análisis de DOCX
 - `analizar_pdf_qa(pdf_bytes, prompt_p)` — análisis de PDF
 
-### Vigencia normativa (nuevo — 2026-06-24)
+### Vigencia normativa (2026-06-24)
 - `verificar_vigencia_norma(codigo_norma)` — consulta vigencia via Google Search Grounding
   - Retorna: `{estado, ultima_actualizacion, reemplazada_por, detalle, norma}`
   - `estado`: `"VIGENTE"` | `"REVISADA"` | `"REEMPLAZADA"` | `"NO DETERMINADO"`
@@ -257,3 +270,6 @@ Flujo:
 - **Modelo:** `gemini-3-flash-preview` — si cambia, actualizar en `engine.py` línea 22
 - **`google-genai >= 1.0.0`** requerido para `types.GoogleSearch()` y `types.GenerateContentConfig(tools=...)`
 - Los PDFs de normas en GCS pueden tener páginas escaneadas → el engine lo detecta y activa modo visual
+- **`io` y `zipfile`** importados en `app.py` para generación de ZIPs en Anotaciones
+- **`foto_reset_counter`** controla keys de cámara Y toggle en Anotaciones — al incrementar, ambos se resetean (comportamiento esperado tras guardar foto)
+- **Descarga de conversación normativa:** botón `type="primary"` aparece en `col_clear_right` solo cuando hay mensajes; genera `.md` con turnos Inspector/Asistente INVAP

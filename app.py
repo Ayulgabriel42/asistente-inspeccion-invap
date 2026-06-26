@@ -1,8 +1,10 @@
 import os
 import re
+import io
 import json
 import uuid
 import base64
+import zipfile
 from pathlib import Path
 import datetime
 import unicodedata
@@ -1459,15 +1461,19 @@ def anotaciones_a_markdown(anotaciones):
     for i, nota in enumerate(anotaciones, start=1):
         fecha = nota.get("fecha", "")
         texto = nota.get("texto", "").strip()
+        fotos = nota.get("fotos", [])
         lineas.extend([
             f"## Nota {i}",
             f"**Fecha:** {fecha}",
             "",
             texto,
-            "",
-            "---",
             ""
         ])
+        if fotos:
+            nombres = ", ".join(f["nombre"] for f in fotos)
+            lineas.append(f"📷 *Fotos adjuntas ({len(fotos)}): {nombres}*")
+            lineas.append("")
+        lineas.extend(["---", ""])
 
     return "\n".join(lineas)
 
@@ -1532,6 +1538,8 @@ def init_session_state():
         "anotaciones": [],
         "texto_anotacion": "",
         "audio_anotacion_procesado": False,
+        "fotos_temp": [],
+        "foto_reset_counter": 0,
 
         # QA
         "qa_resultado": "",
@@ -1670,6 +1678,8 @@ def limpiar_anotaciones_completas():
     st.session_state["anotaciones"] = []
     st.session_state["texto_anotacion"] = ""
     st.session_state["audio_anotacion_procesado"] = False
+    st.session_state["fotos_temp"] = []
+    st.session_state["foto_reset_counter"] = st.session_state.get("foto_reset_counter", 0) + 1
     st.session_state["anotacion_reset_counter"] += 1
     st.rerun()
 
@@ -1677,6 +1687,8 @@ def limpiar_anotaciones_completas():
 def limpiar_entrada_anotacion():
     st.session_state["texto_anotacion"] = ""
     st.session_state["audio_anotacion_procesado"] = False
+    st.session_state["fotos_temp"] = []
+    st.session_state["foto_reset_counter"] = st.session_state.get("foto_reset_counter", 0) + 1
     st.session_state["anotacion_reset_counter"] += 1
     st.rerun()
 
@@ -2849,7 +2861,10 @@ def render_consultas_normativas():
                     st.markdown(msg.get("content", ""))
 
     st.write("")
-    col_clear_left, col_clear_mid, col_clear_right = st.columns([2.2, 1.15, 2.2])
+    if mensajes:
+        col_clear_left, col_clear_mid, col_clear_gap, col_clear_right, col_clear_end = st.columns([1.5, 1.15, 0.2, 1.15, 1.5])
+    else:
+        col_clear_left, col_clear_mid, col_clear_end = st.columns([2.2, 1.15, 2.2])
 
     with col_clear_mid:
         if st.button(
@@ -2861,14 +2876,31 @@ def render_consultas_normativas():
             st.session_state["chat_normativo_reset_counter"] = st.session_state.get("chat_normativo_reset_counter", 0) + 1
             st.rerun()
 
+    if mensajes:
+        lineas = [f"# Conversación técnica normativa\n**Fecha:** {ahora_argentina().strftime('%d/%m/%Y %H:%M')}\n\n---\n"]
+        for msg in mensajes:
+            if msg.get("role") == "user":
+                lineas.append(f"**Inspector:** {msg.get('content', '')}\n\n---\n")
+            else:
+                lineas.append(f"**Asistente INVAP:** {msg.get('content', '')}\n\n---\n")
+        contenido_md = "\n".join(lineas)
+        with col_clear_right:
+            st.download_button(
+                label="⬇ Descargar conversación",
+                data=contenido_md,
+                file_name=f"conversacion_normativa_{ahora_argentina().strftime('%Y%m%d_%H%M')}.md",
+                mime="text/markdown",
+                type="primary",
+                width="stretch",
+                key="chat_normativo_download"
+            )
+
 def render_anotaciones():
     st.markdown("""
     <style>
-    /* Ajustes específicos para la sección Anotaciones */
     div[data-testid="stVerticalBlock"]:has(textarea[aria-label="Nueva anotación"]) textarea {
         min-height: 132px !important;
     }
-
     div[data-testid="stVerticalBlock"]:has(textarea[aria-label="Nueva anotación"]) .stButton > button {
         min-height: 48px !important;
         height: 48px !important;
@@ -2876,7 +2908,6 @@ def render_anotaciones():
         padding: 0.45rem 0.75rem !important;
         border-radius: 14px !important;
     }
-
     div[data-testid="stVerticalBlock"]:has(textarea[aria-label="Nueva anotación"]) [data-testid="column"] {
         padding-left: 0.25rem !important;
         padding-right: 0.25rem !important;
@@ -2885,41 +2916,31 @@ def render_anotaciones():
     """, unsafe_allow_html=True)
 
     st.markdown('<div class="big-section-title">🗒️ Anotaciones</div>', unsafe_allow_html=True)
-    st.caption("Puede guardar múltiples anotaciones y descargarlas cuando quiera en formato Markdown.")
+    st.caption("Registrá texto (manual o por audio) y fotografías. Cada anotación agrupa texto + fotos. Descargá todo junto o por separado.")
 
+    # ── ENTRADA DE TEXTO ────────────────────────────────────────────
     col_audio, col_manual = st.columns([1, 1.5])
 
     with col_audio:
         st.markdown("### Entrada por audio")
-
         audio_anotacion_key = f"audio_anotacion_{st.session_state['anotacion_reset_counter']}"
-        audio_anotacion = st.audio_input(
-            "Dictar anotación",
-            key=audio_anotacion_key
-        )
+        audio_anotacion = st.audio_input("Dictar anotación", key=audio_anotacion_key)
 
         if audio_anotacion and not st.session_state.get("audio_anotacion_procesado", False):
             try:
                 with st.spinner("Transcribiendo anotación..."):
-                    audio_bytes = audio_anotacion.getvalue()
-
                     texto_transcripto = st.session_state["motor"].transcribir_audio(
-                        audio_bytes,
-                        audio_anotacion.type
+                        audio_anotacion.getvalue(), audio_anotacion.type
                     )
-
                     st.session_state["texto_anotacion"] = texto_transcripto
                     st.session_state["audio_anotacion_procesado"] = True
                     st.session_state["anotacion_reset_counter"] += 1
-
                     st.rerun()
-
             except Exception as e:
                 st.error(f"No se pudo transcribir la anotación: {e}")
 
     with col_manual:
         st.markdown("### Entrada manual")
-
         nota_key = f"nueva_anotacion_{st.session_state['anotacion_reset_counter']}"
         nueva_nota = st.text_area(
             "Nueva anotación",
@@ -2929,63 +2950,183 @@ def render_anotaciones():
             key=nota_key,
             label_visibility="collapsed"
         )
-
         st.session_state["texto_anotacion"] = nueva_nota
 
-        col_note_1, col_note_2, col_note_3 = st.columns([0.9, 0.9, 0.9])
-
-        with col_note_1:
-            if st.button("➕ Agregar anotación", width="stretch"):
-                if not nueva_nota.strip():
-                    st.warning("Escriba o dicte una anotación antes de agregar.")
-                else:
-                    st.session_state["anotaciones"].append({
-                        "fecha": ahora_argentina().strftime("%d/%m/%Y %H:%M"),
-                        "texto": nueva_nota.strip()
-                    })
-                    st.session_state["texto_anotacion"] = ""
-                    st.session_state["audio_anotacion_procesado"] = False
-                    st.session_state["anotacion_reset_counter"] += 1
-                    st.success("Anotación agregada.")
-                    st.rerun()
-
-        with col_note_2:
-            if st.button("🧹 Limpiar entrada", width="stretch"):
-                limpiar_entrada_anotacion()
-
-        with col_note_3:
-            if st.button("🗑️ Borrar todas", width="stretch"):
-                limpiar_anotaciones_completas()
-
+    # ── CÁMARA ──────────────────────────────────────────────────────
     st.write("")
+    foto_reset = st.session_state.get("foto_reset_counter", 0)
+    fotos_temp = st.session_state.get("fotos_temp", [])
 
-    cantidad = len(st.session_state["anotaciones"])
+    usar_camara_foto = st.toggle(
+        "📷 Activar cámara",
+        value=False,
+        key=f"foto_camara_toggle_{foto_reset}"
+    )
+    foto_camara = None
+    if usar_camara_foto:
+        foto_camara = st.camera_input("Capturar foto", key=f"foto_camara_{foto_reset}", label_visibility="collapsed")
+        if foto_camara:
+            col_cam_sp1, col_cam_btn, col_cam_sp2 = st.columns([2, 1.2, 2])
+            with col_cam_btn:
+                if st.button("📷 Agregar foto", width="stretch", key="foto_agregar_temp_btn"):
+                    img_bytes = foto_camara.getvalue()
+                    ext = "jpg" if foto_camara.type in ("image/jpeg", "image/jpg") else foto_camara.type.split("/")[-1]
+                    nombre = f"foto_{ahora_argentina().strftime('%Y%m%d_%H%M%S')}_{len(fotos_temp) + 1}.{ext}"
+                    fotos_temp.append({"nombre": nombre, "bytes": img_bytes, "mime": foto_camara.type})
+                    st.session_state["fotos_temp"] = fotos_temp
+                    st.session_state["foto_reset_counter"] = foto_reset + 1
+                    st.rerun()
+    else:
+        st.markdown(
+            """
+            <div class="camera-off-box" style="padding:0.45rem 0.75rem !important; font-size:0.78rem !important; font-weight:400 !important; color:var(--text-muted, #6c757d) !important;">
+                📷 Cámara apagada
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+    # Miniaturas de fotos pendientes
+    if fotos_temp:
+        st.caption(f"📎 {len(fotos_temp)} foto(s) lista(s) para incluir en la anotación")
+        cols_prev = st.columns(min(len(fotos_temp), 4))
+        for idx, f in enumerate(fotos_temp):
+            with cols_prev[idx % 4]:
+                st.image(f["bytes"], use_container_width=True)
+
+    # ── BOTONES DE ACCIÓN ───────────────────────────────────────────
+    st.write("")
+    col_note_1, col_note_2, col_note_3 = st.columns([0.9, 0.9, 0.9])
+
+    with col_note_1:
+        if st.button("➕ Agregar anotación", width="stretch"):
+            # Incluir foto activa en cámara aunque no se haya presionado "Agregar foto"
+            fotos_a_guardar = fotos_temp.copy()
+            if foto_camara:
+                img_bytes = foto_camara.getvalue()
+                ext = "jpg" if foto_camara.type in ("image/jpeg", "image/jpg") else foto_camara.type.split("/")[-1]
+                nombre = f"foto_{ahora_argentina().strftime('%Y%m%d_%H%M%S')}_{len(fotos_a_guardar) + 1}.{ext}"
+                fotos_a_guardar.append({"nombre": nombre, "bytes": img_bytes, "mime": foto_camara.type})
+
+            if not nueva_nota.strip() and not fotos_a_guardar:
+                st.warning("Escriba texto o tome al menos una foto antes de agregar.")
+            else:
+                st.session_state["anotaciones"].append({
+                    "fecha": ahora_argentina().strftime("%d/%m/%Y %H:%M"),
+                    "texto": nueva_nota.strip(),
+                    "fotos": fotos_a_guardar
+                })
+                st.session_state["texto_anotacion"] = ""
+                st.session_state["audio_anotacion_procesado"] = False
+                st.session_state["fotos_temp"] = []
+                st.session_state["foto_reset_counter"] = foto_reset + 1
+                st.session_state["anotacion_reset_counter"] += 1
+                st.rerun()
+
+    with col_note_2:
+        if st.button("🧹 Limpiar entrada", width="stretch"):
+            limpiar_entrada_anotacion()
+
+    with col_note_3:
+        if st.button("🗑️ Borrar todas", width="stretch"):
+            limpiar_anotaciones_completas()
+
+    # ── HISTORIAL ───────────────────────────────────────────────────
+    st.write("")
+    st.markdown("---")
+
+    anotaciones = st.session_state["anotaciones"]
+    cantidad = len(anotaciones)
     st.info(f"Cantidad de anotaciones: {cantidad}")
 
-    if st.session_state["anotaciones"]:
-        col_desc1, col_desc2 = st.columns([1, 3])
-        with col_desc1:
-            md = anotaciones_a_markdown(st.session_state["anotaciones"])
-            generar_descarga_markdown(
-                nombre_base="Anotaciones_Inspeccion",
-                contenido_md=md,
-                label="⬇️ Descargar MD"
+    if anotaciones:
+        # Descargas
+        todas_fotos = [f for nota in anotaciones for f in nota.get("fotos", [])]
+        md = anotaciones_a_markdown(anotaciones)
+        ts = ahora_argentina().strftime("%Y%m%d_%H%M")
+
+        col_dl1, col_dl2, col_dl3 = st.columns(3)
+
+        with col_dl1:
+            # ZIP completo: markdown + fotos organizadas por nota
+            zip_todo = io.BytesIO()
+            with zipfile.ZipFile(zip_todo, "w", zipfile.ZIP_DEFLATED) as zf:
+                zf.writestr("anotaciones.md", md)
+                for i, nota in enumerate(anotaciones, start=1):
+                    for foto in nota.get("fotos", []):
+                        zf.writestr(f"fotos/nota_{i}/{foto['nombre']}", foto["bytes"])
+            zip_todo.seek(0)
+            st.download_button(
+                label="⬇ Todo (ZIP)",
+                data=zip_todo,
+                file_name=f"anotaciones_completo_{ts}.zip",
+                mime="application/zip",
+                type="primary",
+                use_container_width=True,
+                key="dl_todo_zip"
             )
 
+        with col_dl2:
+            st.download_button(
+                label="⬇ Solo texto (MD)",
+                data=md,
+                file_name=f"anotaciones_{ts}.md",
+                mime="text/markdown",
+                use_container_width=True,
+                key="dl_solo_md"
+            )
+
+        with col_dl3:
+            if todas_fotos:
+                zip_fotos = io.BytesIO()
+                with zipfile.ZipFile(zip_fotos, "w", zipfile.ZIP_DEFLATED) as zf:
+                    for i, nota in enumerate(anotaciones, start=1):
+                        for foto in nota.get("fotos", []):
+                            zf.writestr(f"nota_{i}/{foto['nombre']}", foto["bytes"])
+                zip_fotos.seek(0)
+                st.download_button(
+                    label="⬇ Solo fotos (ZIP)",
+                    data=zip_fotos,
+                    file_name=f"fotos_inspeccion_{ts}.zip",
+                    mime="application/zip",
+                    use_container_width=True,
+                    key="dl_solo_fotos"
+                )
+            else:
+                st.button("⬇ Solo fotos (ZIP)", disabled=True, use_container_width=True, key="dl_solo_fotos_disabled")
+
+        # Historial
+        st.write("")
         st.markdown("### Historial")
-        for i, nota in enumerate(st.session_state["anotaciones"], start=1):
+        for i, nota in enumerate(anotaciones, start=1):
             fecha_nota = nota.get("fecha", "")
             texto_nota = nota.get("texto", "")
+            fotos_nota = nota.get("fotos", [])
+
             st.markdown(
                 f"""
                 <div class="note-box">
-                    <strong>Nota {i}</strong><br>
+                    <strong>Nota {i}</strong> &nbsp;
                     <span class="small-muted">{fecha_nota}</span>
-                    <p>{texto_nota}</p>
+                    {"<br>" + texto_nota if texto_nota else ""}
                 </div>
                 """,
                 unsafe_allow_html=True
             )
+            if fotos_nota:
+                cols_hist = st.columns(min(len(fotos_nota), 4))
+                for idx, foto in enumerate(fotos_nota):
+                    with cols_hist[idx % 4]:
+                        st.image(foto["bytes"], use_container_width=True)
+                        st.download_button(
+                            label="⬇",
+                            data=foto["bytes"],
+                            file_name=foto["nombre"],
+                            mime=foto["mime"],
+                            key=f"dl_foto_hist_{i}_{idx}",
+                            use_container_width=True,
+                        )
+            st.write("")
     else:
         st.info("Todavía no hay anotaciones cargadas.")
 
